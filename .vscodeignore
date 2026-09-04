@@ -12,3 +12,5 @@ node_modules/**
 **/*.map
 .github/**
 docs/**
+release-please-config.json
+.release-please-manifest.json

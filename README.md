@@ -107,6 +107,32 @@ npm run package   # vsce package 生成 .vsix
 
 在 VSCode 中打开本项目,按 `F5` 启动 Extension Development Host 即可实时调试(本地 macOS/Windows 环境下 CPU/内存会走 `os` 模块兜底路径,便于在没有远程 Linux 主机时也能验证核心交互)。
 
+## CI / 发布流水线
+
+仓库里配了三个 workflow(`.github/workflows/`):
+
+| Workflow | 触发条件 | 作用 |
+|---|---|---|
+| `ci.yml` | 每次 push / PR 到 `main` | `npm ci` → 编译 → 单元测试 → `vsce package` 冒烟检查 |
+| `release-please.yml` | push 到 `main` | 根据 [Conventional Commits](https://www.conventionalcommits.org/) 提交信息,自动维护一个"Release PR"(更新 `package.json` 版本号 + `CHANGELOG.md`);合并该 PR 后自动打 tag、建 GitHub Release |
+| `publish.yml` | GitHub Release 发布(`release: published`) | 编译 → 测试 → 打包 `.vsix` → 附加到 Release → 发布到 VS Code Marketplace(`vsce publish`)与 Open VSX(`ovsx publish`) |
+
+也就是说完整链路是:**日常提交遵循 Conventional Commits(`feat: xxx` / `fix: xxx` / `chore: xxx` …)→ release-please 开出版本 PR → 合并后自动发 GitHub Release → 自动推送到两个插件市场**。
+
+### 一次性手动准备(仓库 Secrets)
+
+自动发布到两个市场之前,需要先手动完成(仅需一次):
+
+1. **VS Code Marketplace**:在 [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage) 注册一个 publisher(需确认与 `package.json` 里的 `"publisher": "tanzz-dev"` 一致,或改成你实际注册的 publisher id),再在 Azure DevOps 生成一个 **Marketplace (Manage)** 权限的 PAT。
+2. **Open VSX**:在 [open-vsx.org](https://open-vsx.org) 用 Eclipse 账号登录,认领与 publisher 同名的 namespace(`npx ovsx create-namespace tanzz-dev -p <token>` 或网页操作),再生成一个 access token。
+3. 把两个 token 写入仓库 Secrets(建议在自己终端执行,不要把 token 贴进聊天):
+   ```bash
+   gh secret set VSCE_PAT --repo tzzs/remote-pulse
+   gh secret set OVSX_PAT --repo tzzs/remote-pulse
+   ```
+
+在这两个 Secrets 配置好之前,`publish.yml` 会在 Marketplace/Open VSX 发布这两步失败(其余步骤——编译、测试、打包、上传 `.vsix` 到 Release——不受影响),属于预期行为。
+
 ## 许可
 
 [MIT](LICENSE)
