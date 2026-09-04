@@ -1,0 +1,129 @@
+{
+  "name": "remote-pulse",
+  "displayName": "Remote Pulse",
+  "description": "远程脉搏 —— 以原生延迟指示器般安静的方式,持续感知 Remote-SSH 远程主机的 CPU/内存/磁盘/网络/GPU/Docker 状态",
+  "version": "0.1.0",
+  "publisher": "tanzz-dev",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["remote-ssh", "monitor", "status bar", "cpu", "gpu", "docker"],
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tzzs/remote-pulse.git"
+  },
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "remotePulse.showTrend",
+        "title": "Remote Pulse: 显示趋势图",
+        "category": "Remote Pulse"
+      },
+      {
+        "command": "remotePulse.refresh",
+        "title": "Remote Pulse: 立即刷新",
+        "category": "Remote Pulse"
+      }
+    ],
+    "configuration": {
+      "title": "Remote Pulse",
+      "properties": {
+        "remotePulse.refreshInterval": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 500,
+          "description": "前台高频指标(CPU/内存)刷新间隔,单位毫秒"
+        },
+        "remotePulse.backgroundInterval": {
+          "type": "number",
+          "default": 15000,
+          "minimum": 1000,
+          "description": "窗口失焦后的降频刷新间隔,单位毫秒"
+        },
+        "remotePulse.heavyMetricInterval": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 2000,
+          "description": "GPU/Docker 等低频指标的独立轮询间隔,单位毫秒"
+        },
+        "remotePulse.statusBarMetric": {
+          "type": "string",
+          "enum": ["cpu", "memory"],
+          "default": "cpu",
+          "description": "状态栏常驻显示的主指标"
+        },
+        "remotePulse.warningThreshold": {
+          "type": "number",
+          "default": 80,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "告警阈值(百分比),超过后状态栏变为警告色"
+        },
+        "remotePulse.criticalThreshold": {
+          "type": "number",
+          "default": 95,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "严重阈值(百分比),超过后状态栏变为严重告警色"
+        },
+        "remotePulse.template": {
+          "type": "string",
+          "default": "$(pulse) ${value}%",
+          "description": "状态栏显示模板,${value} 会被替换为当前指标数值"
+        },
+        "remotePulse.enableGpu": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否探测并展示 GPU 信息(需要 nvidia-smi)"
+        },
+        "remotePulse.enableDocker": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否探测并展示 Docker 容器信息(需要可访问 docker.sock)"
+        },
+        "remotePulse.enableNetwork": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否在 tooltip 中展示网络上下行速率"
+        },
+        "remotePulse.enableNotifications": {
+          "type": "boolean",
+          "default": false,
+          "description": "越过严重阈值时是否弹出系统通知"
+        },
+        "remotePulse.diskMountPoints": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "指定要监控的磁盘挂载点,留空则自动选择使用率最高的挂载点"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run build && tsc -p ./test/tsconfig.test.json",
+    "test": "node --test out-test/test/*.test.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.5.4",
+    "@vscode/vsce": "^3.0.0"
+  }
+}
