@@ -2,27 +2,40 @@
   "name": "remote-pulse",
   "displayName": "Remote Pulse",
   "description": "远程脉搏 —— 以原生延迟指示器般安静的方式,持续感知 Remote-SSH 远程主机的 CPU/内存/磁盘/网络/GPU/Docker 状态",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "tanzz",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
-  "keywords": ["remote-ssh", "monitor", "status bar", "cpu", "gpu", "docker"],
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "remote-ssh",
+    "monitor",
+    "status bar",
+    "cpu",
+    "gpu",
+    "docker"
+  ],
   "icon": "images/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/tzzs/remote-pulse.git"
   },
-  "extensionKind": ["workspace"],
+  "extensionKind": [
+    "workspace"
+  ],
   "capabilities": {
     "virtualWorkspaces": false,
     "untrustedWorkspaces": {
       "supported": true
     }
   },
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -60,7 +73,10 @@
         },
         "remotePulse.statusBarMetric": {
           "type": "string",
-          "enum": ["cpu", "memory"],
+          "enum": [
+            "cpu",
+            "memory"
+          ],
           "default": "cpu",
           "description": "状态栏常驻显示的主指标"
         },
@@ -105,7 +121,9 @@
         },
         "remotePulse.diskMountPoints": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "指定要监控的磁盘挂载点,留空则自动选择使用率最高的挂载点"
         }
