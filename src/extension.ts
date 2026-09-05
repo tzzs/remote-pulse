@@ -71,9 +71,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // 只在"跨越"到严重态的那一刻通知一次,而不是每轮轮询都弹窗,避免持续过载时通知刷屏。
     // 恢复到阈值以下后重新越界会再次触发,保证用户始终能看到最新一次告警。
     if (isCritical && !lastWasCritical) {
-      const metricLabel = config.statusBarMetric === 'memory' ? '内存' : 'CPU';
+      const metricLabel = config.statusBarMetric === 'memory' ? vscode.l10n.t('Memory') : 'CPU';
       void vscode.window.showWarningMessage(
-        `Remote Pulse: ${hostLabel} 的 ${metricLabel} 使用率已达到 ${Math.round(percent)}%`,
+        `Remote Pulse: ${vscode.l10n.t('{0} usage on {1} has reached {2}%', metricLabel, hostLabel, Math.round(percent))}`,
       );
     }
     lastWasCritical = isCritical;
@@ -155,7 +155,7 @@ function resolveHostLabel(): string {
     const ip = findNonInternalIPv4();
     return ip ? `${hostname} (${ip})` : hostname;
   } catch {
-    return '远程主机';
+    return vscode.l10n.t('Remote host');
   }
 }
 

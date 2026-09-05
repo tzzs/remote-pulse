@@ -43,7 +43,7 @@ export class TrendPanel {
   }
 
   private constructor(hostLabel: string, series: TrendSeries) {
-    this.panel = vscode.window.createWebviewPanel('remotePulseTrend', 'Remote Pulse 趋势图', vscode.ViewColumn.Beside, {
+    this.panel = vscode.window.createWebviewPanel('remotePulseTrend', vscode.l10n.t('Remote Pulse Trend'), vscode.ViewColumn.Beside, {
       enableScripts: true,
       retainContextWhenHidden: false,
     });
@@ -63,11 +63,11 @@ export class TrendPanel {
     const hostLabelSafe = hostLabel.replace(/[<>&]/g, '');
 
     return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${vscode.env.language}">
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src 'nonce-${n}';" />
-  <title>Remote Pulse 趋势图</title>
+  <title>${vscode.l10n.t('Remote Pulse Trend')}</title>
   <style>
     body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 12px; }
     h2 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
@@ -81,13 +81,13 @@ export class TrendPanel {
   </style>
 </head>
 <body>
-  <h2>${hostLabelSafe} — 过去 30 分钟</h2>
+  <h2>${hostLabelSafe} — ${vscode.l10n.t('past 30 minutes')}</h2>
   <div class="legend">
     <span><i class="dot cpu-dot"></i>CPU %</span>
-    <span><i class="dot mem-dot"></i>内存 %</span>
+    <span><i class="dot mem-dot"></i>${vscode.l10n.t('Memory')} %</span>
   </div>
   <canvas id="chart" width="800" height="260"></canvas>
-  <p id="empty-hint" class="empty" style="display:none;">暂无足够的历史数据,请稍候几秒再打开。</p>
+  <p id="empty-hint" class="empty" style="display:none;">${vscode.l10n.t('Not enough history data yet. Please wait a few seconds and reopen.')}</p>
   <script nonce="${n}">
     const series = ${dataJson};
     const canvas = document.getElementById('chart');

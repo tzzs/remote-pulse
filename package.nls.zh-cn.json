@@ -1,0 +1,17 @@
+{
+  "extension.description": "远程脉搏 —— 以原生延迟指示器般安静的方式,持续感知 Remote-SSH 远程主机的 CPU/内存/磁盘/网络/GPU/Docker 状态",
+  "command.showTrend.title": "Remote Pulse: 显示趋势图",
+  "command.refresh.title": "Remote Pulse: 立即刷新",
+  "config.refreshInterval.description": "前台高频指标(CPU/内存)刷新间隔,单位毫秒",
+  "config.backgroundInterval.description": "窗口失焦后的降频刷新间隔,单位毫秒",
+  "config.heavyMetricInterval.description": "GPU/Docker 等低频指标的独立轮询间隔,单位毫秒",
+  "config.statusBarMetric.description": "状态栏常驻显示的主指标",
+  "config.warningThreshold.description": "告警阈值(百分比),超过后状态栏变为警告色",
+  "config.criticalThreshold.description": "严重阈值(百分比),超过后状态栏变为严重告警色",
+  "config.template.description": "状态栏显示模板,${value} 会被替换为当前指标数值",
+  "config.enableGpu.description": "是否探测并展示 GPU 信息(需要 nvidia-smi)",
+  "config.enableDocker.description": "是否探测并展示 Docker 容器信息(需要可访问 docker.sock)",
+  "config.enableNetwork.description": "是否在 tooltip 中展示网络上下行速率",
+  "config.enableNotifications.description": "越过严重阈值时是否弹出系统通知",
+  "config.diskMountPoints.description": "指定要监控的磁盘挂载点,留空则自动选择使用率最高的挂载点"
+}

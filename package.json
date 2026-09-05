@@ -1,7 +1,7 @@
 {
   "name": "remote-pulse",
   "displayName": "Remote Pulse",
-  "description": "远程脉搏 —— 以原生延迟指示器般安静的方式,持续感知 Remote-SSH 远程主机的 CPU/内存/磁盘/网络/GPU/Docker 状态",
+  "description": "%extension.description%",
   "version": "0.1.0",
   "publisher": "tanzz",
   "license": "MIT",
@@ -11,6 +11,7 @@
   "categories": ["Other"],
   "keywords": ["remote-ssh", "monitor", "status bar", "cpu", "gpu", "docker"],
   "icon": "images/icon.png",
+  "l10n": "./l10n",
   "repository": {
     "type": "git",
     "url": "https://github.com/tzzs/remote-pulse.git"
@@ -28,12 +29,12 @@
     "commands": [
       {
         "command": "remotePulse.showTrend",
-        "title": "Remote Pulse: 显示趋势图",
+        "title": "%command.showTrend.title%",
         "category": "Remote Pulse"
       },
       {
         "command": "remotePulse.refresh",
-        "title": "Remote Pulse: 立即刷新",
+        "title": "%command.refresh.title%",
         "category": "Remote Pulse"
       }
     ],
@@ -44,70 +45,70 @@
           "type": "number",
           "default": 2000,
           "minimum": 500,
-          "description": "前台高频指标(CPU/内存)刷新间隔,单位毫秒"
+          "description": "%config.refreshInterval.description%"
         },
         "remotePulse.backgroundInterval": {
           "type": "number",
           "default": 15000,
           "minimum": 1000,
-          "description": "窗口失焦后的降频刷新间隔,单位毫秒"
+          "description": "%config.backgroundInterval.description%"
         },
         "remotePulse.heavyMetricInterval": {
           "type": "number",
           "default": 10000,
           "minimum": 2000,
-          "description": "GPU/Docker 等低频指标的独立轮询间隔,单位毫秒"
+          "description": "%config.heavyMetricInterval.description%"
         },
         "remotePulse.statusBarMetric": {
           "type": "string",
           "enum": ["cpu", "memory"],
           "default": "cpu",
-          "description": "状态栏常驻显示的主指标"
+          "description": "%config.statusBarMetric.description%"
         },
         "remotePulse.warningThreshold": {
           "type": "number",
           "default": 80,
           "minimum": 1,
           "maximum": 100,
-          "description": "告警阈值(百分比),超过后状态栏变为警告色"
+          "description": "%config.warningThreshold.description%"
         },
         "remotePulse.criticalThreshold": {
           "type": "number",
           "default": 95,
           "minimum": 1,
           "maximum": 100,
-          "description": "严重阈值(百分比),超过后状态栏变为严重告警色"
+          "description": "%config.criticalThreshold.description%"
         },
         "remotePulse.template": {
           "type": "string",
           "default": "$(pulse) ${value}%",
-          "description": "状态栏显示模板,${value} 会被替换为当前指标数值"
+          "description": "%config.template.description%"
         },
         "remotePulse.enableGpu": {
           "type": "boolean",
           "default": true,
-          "description": "是否探测并展示 GPU 信息(需要 nvidia-smi)"
+          "description": "%config.enableGpu.description%"
         },
         "remotePulse.enableDocker": {
           "type": "boolean",
           "default": true,
-          "description": "是否探测并展示 Docker 容器信息(需要可访问 docker.sock)"
+          "description": "%config.enableDocker.description%"
         },
         "remotePulse.enableNetwork": {
           "type": "boolean",
           "default": false,
-          "description": "是否在 tooltip 中展示网络上下行速率"
+          "description": "%config.enableNetwork.description%"
         },
         "remotePulse.enableNotifications": {
           "type": "boolean",
           "default": false,
-          "description": "越过严重阈值时是否弹出系统通知"
+          "description": "%config.enableNotifications.description%"
         },
         "remotePulse.diskMountPoints": {
           "type": "array",
           "items": { "type": "string" },
           "default": [],
-          "description": "指定要监控的磁盘挂载点,留空则自动选择使用率最高的挂载点"
+          "description": "%config.diskMountPoints.description%"
         }
       }
     }

@@ -52,6 +52,7 @@ Click the status bar item to open a line chart of the last 30 minutes of CPU/mem
 - **Threshold alerts**: the status bar changes color when CPU/memory crosses a threshold, with an optional system notification (fires once per crossing into the critical state, so it won't spam you)
 - **History trend**: a tooltip sparkline plus a Webview line chart on click
 - **Adaptive polling**: automatically throttles once the window loses focus, reducing load on the remote machine
+- **Localized UI**: commands, settings, and the status bar/webview text follow VS Code's display language (English by default, with a 简体中文 translation)
 
 ## Installation
 
