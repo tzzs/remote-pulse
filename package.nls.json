@@ -1,0 +1,17 @@
+{
+  "extension.description": "Remote Pulse — a quiet, native-feeling indicator that continuously tracks your Remote-SSH host's CPU/memory/disk/network/GPU/Docker status.",
+  "command.showTrend.title": "Remote Pulse: Show Trend Chart",
+  "command.refresh.title": "Remote Pulse: Refresh Now",
+  "config.refreshInterval.description": "Refresh interval for high-frequency foreground metrics (CPU/memory), in milliseconds",
+  "config.backgroundInterval.description": "Reduced refresh interval used once the window loses focus, in milliseconds",
+  "config.heavyMetricInterval.description": "Separate polling interval for low-frequency metrics like GPU/Docker, in milliseconds",
+  "config.statusBarMetric.description": "Primary metric shown persistently in the status bar",
+  "config.warningThreshold.description": "Warning threshold (percentage); the status bar switches to the warning color above it",
+  "config.criticalThreshold.description": "Critical threshold (percentage); the status bar switches to the critical color above it",
+  "config.template.description": "Status bar display template; ${value} is replaced with the current metric value",
+  "config.enableGpu.description": "Whether to detect and show GPU info (requires nvidia-smi)",
+  "config.enableDocker.description": "Whether to detect and show Docker container info (requires access to docker.sock)",
+  "config.enableNetwork.description": "Whether to show network upload/download rates in the tooltip",
+  "config.enableNotifications.description": "Whether to show a system notification when the critical threshold is crossed",
+  "config.diskMountPoints.description": "Disk mount points to monitor; leave empty to auto-select the one with the highest usage"
+}

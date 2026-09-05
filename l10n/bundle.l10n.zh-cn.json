@@ -1,0 +1,17 @@
+{
+  "Collecting remote host status…": "正在采集远程主机状态…",
+  "Collection failed: {0}": "采集失败: {0}",
+  "Remote host: {0}": "远程主机: {0}",
+  "{0} cores": "{0} 核",
+  "Memory": "内存",
+  "Disks:": "磁盘:",
+  "Network": "网络",
+  "VRAM {0}/{1} MB": "显存 {0}/{1} MB",
+  "Running containers: {0}": "运行中容器: {0}",
+  "Click to view trend chart": "点击查看趋势图",
+  "{0} usage on {1} has reached {2}%": "{1} 的 {0} 使用率已达到 {2}%",
+  "Remote host": "远程主机",
+  "Remote Pulse Trend": "Remote Pulse 趋势图",
+  "past 30 minutes": "过去 30 分钟",
+  "Not enough history data yet. Please wait a few seconds and reopen.": "暂无足够的历史数据,请稍候几秒再打开。"
+}
