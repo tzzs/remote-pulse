@@ -1,34 +1,40 @@
 import * as vscode from 'vscode';
 import { AlertLevel, CollectionState, Snapshot } from './types';
 import { RemotePulseConfig } from './config';
-import { calcAlertLevel } from './store/statsStore';
+import { calcAlertLevel, maxAlertLevel } from './store/statsStore';
 import { renderSparkline, formatBytes, formatRate, formatUptime } from './util/sparkline';
 
 const SHOW_TREND_COMMAND = 'remotePulse.showTrend';
 
 export class PulseStatusBar {
   private readonly item: vscode.StatusBarItem;
+  /** 复用同一个 MarkdownString 实例,只改 .value,不重新赋值 item.tooltip——避免 hover 弹出期间被强制刷新导致闪烁。 */
+  private readonly tooltipMarkdown: vscode.MarkdownString;
 
   constructor() {
-    this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
     this.item.name = 'Remote Pulse';
     this.item.command = SHOW_TREND_COMMAND;
-    this.item.text = '$(sync~spin)';
-    this.item.tooltip = vscode.l10n.t('Collecting remote host status…');
+    this.tooltipMarkdown = new vscode.MarkdownString();
+    this.tooltipMarkdown.isTrusted = false;
+    this.item.tooltip = this.tooltipMarkdown;
+    this.showLoading();
     this.item.show();
   }
 
   showLoading(): void {
     this.item.text = '$(sync~spin)';
-    this.item.tooltip = vscode.l10n.t('Collecting remote host status…');
+    this.item.color = undefined;
     this.item.backgroundColor = undefined;
+    this.tooltipMarkdown.value = vscode.l10n.t('Collecting remote host status…');
   }
 
   /** 采集失败(权限/网络抖动)时静默降级,不弹烦人的错误通知,只在 tooltip 里说明原因。 */
   showError(reason: string): void {
     this.item.text = '$(circle-slash)';
-    this.item.tooltip = new vscode.MarkdownString(vscode.l10n.t('Collection failed: {0}', reason));
+    this.item.color = undefined;
     this.item.backgroundColor = undefined;
+    this.tooltipMarkdown.value = vscode.l10n.t('Collection failed: {0}', reason);
   }
 
   update(
@@ -43,22 +49,36 @@ export class PulseStatusBar {
       return;
     }
 
-    const primaryPercent = this.pickPrimaryPercent(snapshot, config);
-    if (primaryPercent === undefined) {
+    const cpuPercent = snapshot.cpu?.percent;
+    const memPercent = snapshot.memory?.percent;
+    if (cpuPercent === undefined && memPercent === undefined) {
       this.showLoading();
       return;
     }
 
-    const level = calcAlertLevel(primaryPercent, config.warningThreshold, config.criticalThreshold);
-    const paddedValue = String(Math.round(primaryPercent)).padStart(2, ' ');
+    const cpuLevel = cpuPercent !== undefined ? calcAlertLevel(cpuPercent, config.warningThreshold, config.criticalThreshold) : 'normal';
+    const memLevel = memPercent !== undefined ? calcAlertLevel(memPercent, config.warningThreshold, config.criticalThreshold) : 'normal';
+    const level = maxAlertLevel(cpuLevel, memLevel);
 
-    let text = config.template.replace('${value}', paddedValue);
+    const cpuText = cpuPercent !== undefined ? String(Math.round(cpuPercent)).padStart(2, ' ') : '--';
+    const memText = memPercent !== undefined ? String(Math.round(memPercent)).padStart(2, ' ') : '--';
+
+    let text = config.template.replace('${cpu}', cpuText).replace('${mem}', memText);
     if (level === 'critical') {
       text = text.replace(/^\$\([a-zA-Z-]+\)/, '$(warning)');
     }
     this.item.text = text;
+    this.item.color = this.colorFor(level);
     this.item.backgroundColor = this.backgroundColorFor(level);
-    this.item.tooltip = this.buildTooltip(hostLabel, snapshot, config, sparklines);
+    this.tooltipMarkdown.value = this.buildTooltip(hostLabel, snapshot, config, sparklines);
+  }
+
+  /** VS Code 状态栏只承认 error/warning 两种语义背景色,没有官方的"正常态背景色",所以正常态改用绿色前景文字区分。 */
+  private colorFor(level: AlertLevel): vscode.ThemeColor | undefined {
+    if (level === 'normal') {
+      return new vscode.ThemeColor('charts.green');
+    }
+    return undefined;
   }
 
   private backgroundColorFor(level: AlertLevel): vscode.ThemeColor | undefined {
@@ -71,53 +91,46 @@ export class PulseStatusBar {
     return undefined;
   }
 
-  private pickPrimaryPercent(snapshot: Snapshot, config: RemotePulseConfig): number | undefined {
-    if (config.statusBarMetric === 'memory') {
-      return snapshot.memory?.percent;
-    }
-    return snapshot.cpu?.percent;
-  }
-
   private buildTooltip(
     hostLabel: string,
     snapshot: Snapshot,
     config: RemotePulseConfig,
     sparklines: { cpu: number[]; memory: number[] },
-  ): vscode.MarkdownString {
+  ): string {
     const lines: string[] = [];
     lines.push(`**${vscode.l10n.t('Remote host: {0}', hostLabel)}**`, '');
 
     if (snapshot.cpu) {
       const cpuSpark = renderSparkline(sparklines.cpu.length > 0 ? sparklines.cpu : [snapshot.cpu.percent]);
-      lines.push(`CPU  ${cpuSpark} ${Math.round(snapshot.cpu.percent)}%  (${vscode.l10n.t('{0} cores', snapshot.cpu.cores)})`);
+      lines.push(`CPU  ${cpuSpark}  ${Math.round(snapshot.cpu.percent)}%  (${vscode.l10n.t('{0} cores', snapshot.cpu.cores)})`);
     }
     if (snapshot.memory) {
       const memSpark = renderSparkline(sparklines.memory.length > 0 ? sparklines.memory : [snapshot.memory.percent]);
       lines.push(
-        `${vscode.l10n.t('Memory')}  ${memSpark} ${Math.round(snapshot.memory.percent)}%  (${formatBytes(snapshot.memory.used)} / ${formatBytes(snapshot.memory.total)})`,
+        `${vscode.l10n.t('Memory')}  ${memSpark}  ${Math.round(snapshot.memory.percent)}%  (${formatBytes(snapshot.memory.used)} / ${formatBytes(snapshot.memory.total)})`,
       );
     }
     if (snapshot.disks && snapshot.disks.length > 0) {
-      lines.push('', vscode.l10n.t('Disks:'));
+      lines.push('', `**${vscode.l10n.t('Disks:')}**`);
       for (const disk of snapshot.disks) {
-        lines.push(`  ${disk.mountPoint}  ${Math.round(disk.percent)}%  (${formatBytes(disk.used)} / ${formatBytes(disk.total)})`);
+        lines.push(`- ${disk.mountPoint}  ${Math.round(disk.percent)}%  (${formatBytes(disk.used)} / ${formatBytes(disk.total)})`);
       }
     }
     if (config.enableNetwork && snapshot.network) {
       lines.push('', `${vscode.l10n.t('Network')}  ↓ ${formatRate(snapshot.network.rxRate)}  ↑ ${formatRate(snapshot.network.txRate)}`);
     }
     if (config.enableGpu && snapshot.gpus && snapshot.gpus.length > 0) {
-      lines.push('', 'GPU:');
+      lines.push('', '**GPU:**');
       for (const gpu of snapshot.gpus) {
         lines.push(
-          `  #${gpu.index} ${gpu.name ?? ''}  ${gpu.utilizationPercent}%  ${vscode.l10n.t('VRAM {0}/{1} MB', gpu.memoryUsedMb, gpu.memoryTotalMb)}  ${gpu.temperatureC}°C`,
+          `- #${gpu.index} ${gpu.name ?? ''}  ${gpu.utilizationPercent}%  ${vscode.l10n.t('VRAM {0}/{1} MB', gpu.memoryUsedMb, gpu.memoryTotalMb)}  ${gpu.temperatureC}°C`,
         );
       }
     }
     if (config.enableDocker && snapshot.docker) {
-      lines.push('', `Docker  ${vscode.l10n.t('Running containers: {0}', snapshot.docker.containerCount)}`);
+      lines.push('', `**Docker** — ${vscode.l10n.t('Running containers: {0}', snapshot.docker.containerCount)}`);
       for (const c of snapshot.docker.containers.slice(0, 5)) {
-        lines.push(`  ${c.name}  CPU ${c.cpuPercent.toFixed(1)}%  ${vscode.l10n.t('Memory')} ${formatBytes(c.memoryUsedBytes)}`);
+        lines.push(`- ${c.name}  CPU ${c.cpuPercent.toFixed(1)}%  ${vscode.l10n.t('Memory')} ${formatBytes(c.memoryUsedBytes)}`);
       }
     }
     if (snapshot.uptimeSeconds !== undefined) {
@@ -125,9 +138,7 @@ export class PulseStatusBar {
     }
     lines.push('', '---', vscode.l10n.t('Click to view trend chart'));
 
-    const md = new vscode.MarkdownString(lines.join('\n'));
-    md.isTrusted = false;
-    return md;
+    return lines.join('  \n');
   }
 
   dispose(): void {

@@ -77,10 +77,9 @@ code --install-extension remote-pulse-0.1.0.vsix
 | `remotePulse.refreshInterval` | `2000` | 前台高频指标(CPU/内存)刷新间隔(ms) |
 | `remotePulse.backgroundInterval` | `15000` | 窗口失焦后的降频间隔(ms) |
 | `remotePulse.heavyMetricInterval` | `10000` | GPU/Docker 等低频指标独立轮询间隔(ms) |
-| `remotePulse.statusBarMetric` | `cpu` | 状态栏主指标:`cpu` \| `memory` |
 | `remotePulse.warningThreshold` | `80` | 告警阈值(%) |
 | `remotePulse.criticalThreshold` | `95` | 严重阈值(%) |
-| `remotePulse.template` | `"$(pulse) ${value}%"` | 状态栏显示模板 |
+| `remotePulse.template` | `"$(pulse) CPU ${cpu}%  MEM ${mem}%"` | 状态栏显示模板(`${cpu}` / `${mem}`) |
 | `remotePulse.enableGpu` | `true` | 是否探测并展示 GPU 信息 |
 | `remotePulse.enableDocker` | `true` | 是否探测并展示 Docker 容器信息 |
 | `remotePulse.enableNetwork` | `false` | 是否展示网络上下行速率 |

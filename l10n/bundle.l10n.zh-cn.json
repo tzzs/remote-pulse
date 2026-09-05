@@ -9,7 +9,7 @@
   "VRAM {0}/{1} MB": "显存 {0}/{1} MB",
   "Running containers: {0}": "运行中容器: {0}",
   "Click to view trend chart": "点击查看趋势图",
-  "{0} usage on {1} has reached {2}%": "{1} 的 {0} 使用率已达到 {2}%",
+  "{0} on {1} has reached the critical threshold": "{1} 上的 {0} 已达到严重阈值",
   "Remote host": "远程主机",
   "Remote Pulse Trend": "Remote Pulse 趋势图",
   "past 30 minutes": "过去 30 分钟",

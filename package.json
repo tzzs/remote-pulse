@@ -72,15 +72,6 @@
           "minimum": 2000,
           "description": "%config.heavyMetricInterval.description%"
         },
-        "remotePulse.statusBarMetric": {
-          "type": "string",
-          "enum": [
-            "cpu",
-            "memory"
-          ],
-          "default": "cpu",
-          "description": "%config.statusBarMetric.description%"
-        },
         "remotePulse.warningThreshold": {
           "type": "number",
           "default": 80,
@@ -97,7 +88,7 @@
         },
         "remotePulse.template": {
           "type": "string",
-          "default": "$(pulse) ${value}%",
+          "default": "$(pulse) CPU ${cpu}%  MEM ${mem}%",
           "description": "%config.template.description%"
         },
         "remotePulse.enableGpu": {

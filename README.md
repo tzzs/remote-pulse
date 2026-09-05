@@ -77,10 +77,9 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 | `remotePulse.refreshInterval` | `2000` | Refresh interval for high-frequency foreground metrics (CPU/memory), in ms |
 | `remotePulse.backgroundInterval` | `15000` | Throttled refresh interval once the window loses focus, in ms |
 | `remotePulse.heavyMetricInterval` | `10000` | Independent polling interval for low-frequency metrics like GPU/Docker, in ms |
-| `remotePulse.statusBarMetric` | `cpu` | Primary metric shown in the status bar: `cpu` \| `memory` |
 | `remotePulse.warningThreshold` | `80` | Warning threshold (%) |
 | `remotePulse.criticalThreshold` | `95` | Critical threshold (%) |
-| `remotePulse.template` | `"$(pulse) ${value}%"` | Status bar display template |
+| `remotePulse.template` | `"$(pulse) CPU ${cpu}%  MEM ${mem}%"` | Status bar display template (`${cpu}` / `${mem}`) |
 | `remotePulse.enableGpu` | `true` | Whether to detect and show GPU info |
 | `remotePulse.enableDocker` | `true` | Whether to detect and show Docker container info |
 | `remotePulse.enableNetwork` | `false` | Whether to show network upload/download rate |

@@ -43,3 +43,10 @@ export function calcAlertLevel(percent: number, warningThreshold: number, critic
   }
   return 'normal';
 }
+
+const ALERT_LEVEL_RANK: Record<AlertLevel, number> = { normal: 0, warning: 1, critical: 2 };
+
+/** 多个指标(CPU/内存)各自的告警级别取最严重的一个,决定状态栏整体的颜色。 */
+export function maxAlertLevel(...levels: AlertLevel[]): AlertLevel {
+  return levels.reduce((worst, level) => (ALERT_LEVEL_RANK[level] > ALERT_LEVEL_RANK[worst] ? level : worst), 'normal' as AlertLevel);
+}
