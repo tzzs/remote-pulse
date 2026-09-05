@@ -1,138 +1,140 @@
-# Remote Pulse(远程脉搏)
+# Remote Pulse
+
+**English** | [简体中文](README.zh-CN.md)
 
 <p align="center">
   <img src="images/icon.png" width="96" height="96" alt="Remote Pulse icon" />
 </p>
 
-以 VSCode 原生延迟指示器般"安静但随时可查"的方式,持续感知 Remote-SSH 远程主机的 CPU / 内存 / 磁盘 / 网络 / GPU / Docker 状态,不打断编码心流。
+Continuously track your Remote-SSH host's CPU / memory / disk / network / GPU / Docker status — as quiet yet always-at-a-glance as VS Code's native latency indicator — without breaking your coding flow.
 
-## 为什么是 Remote Pulse
+## Why Remote Pulse
 
-市面上的同类插件多是把仪表盘搬进状态栏,信息密度高、常驻显示重。Remote Pulse 的差异化:
+Most similar extensions just move a full dashboard into the status bar: dense, and permanently on display. Remote Pulse takes a different approach:
 
-| 维度 | 现有插件普遍做法 | Remote Pulse |
+| Aspect | Common approach elsewhere | Remote Pulse |
 |---|---|---|
-| 常驻信息量 | CPU\|MEM\|DISK 全部平铺 | 默认只有 1 个 icon + 1 个核心数字,其余进 tooltip |
-| 视觉基调 | 数值常态化配色 | 默认中性色,仅越阈值才变色告警 |
-| 交互 | 部分需开侧边栏 | 点击弹出轻量 Webview,不占用常驻空间,关闭不留痕迹 |
-| 资源开销 | 部分用 spawn 子进程轮询 | 直读 `/proc`,核心指标零子进程常态开销 |
-| 场景感知 | 前后台一致轮询 | 窗口失焦自动降频 |
+| Always-on footprint | CPU\|MEM\|DISK all shown flat | Just 1 icon + 1 core number by default; everything else lives in the tooltip |
+| Visual tone | Value-driven coloring at all times | Neutral by default; only colors up when a threshold is crossed |
+| Interaction | Some require opening a sidebar | Click to pop a lightweight Webview — no persistent space used, no trace left after closing |
+| Resource cost | Some poll via spawned subprocesses | Reads `/proc` directly; zero steady-state subprocess overhead for core metrics |
+| Context awareness | Polls at the same rate whether focused or not | Automatically throttles when the window loses focus |
 
-## 效果预览
-
-```
-默认态:  $(pulse) 23%
-告警态:  $(warning) 92%   ← 状态栏背景变为警告色/严重色
-```
-
-鼠标悬浮展开 tooltip:
+## Preview
 
 ```
-远程主机: dev-gpu-01 (192.168.x.x)
+Default: $(pulse) 23%
+Alert:   $(warning) 92%   ← status bar background turns warning/critical color
+```
+
+Hover to expand the tooltip:
+
+```
+Remote host: dev-gpu-01 (192.168.x.x)
 ─────────────────────
-CPU   ▁▃▅▇▆▄▂  23%  (8 核)
-内存  ▂▂▃▄▄▃▂  61%  (9.8G / 16G)
+CPU     ▁▃▅▇▆▄▂  23%  (8 cores)
+Memory  ▂▂▃▄▄▃▂  61%  (9.8G / 16G)
 Uptime  12d 4h
 ─────────────────────
-点击查看趋势图
+Click to view the trend chart
 ```
 
-点击状态栏弹出 30 分钟 CPU/内存趋势的折线图(Webview,关闭即销毁,不常驻内存)。
+Click the status bar item to open a line chart of the last 30 minutes of CPU/memory history (a Webview that's destroyed on close — nothing stays resident in memory).
 
-## 功能
+## Features
 
-- **CPU**:总体使用率、核心数(`/proc/stat` 增量算法,非 loadavg)
-- **内存**:使用率、已用/总量(`MemAvailable` 而非 `MemFree`,更贴近真实可用内存)
-- **磁盘**:各挂载点使用率(自动过滤虚拟文件系统,默认展示使用率 Top 3,或手动指定挂载点)
-- **网络**:上行/下行速率(默认关闭,减少 tooltip 噪音)
-- **GPU**:显存占用、利用率、温度(需要 `nvidia-smi`,不存在则模块整体不激活)
-- **Docker**:运行中容器数与各容器 CPU/内存占用(需要可访问 `/var/run/docker.sock`,无权限则静默降级)
-- **阈值告警**:CPU/内存超阈值时状态栏变色,可选弹出系统通知(仅在"跨越"到严重态时通知一次,避免刷屏)
-- **历史趋势**:tooltip sparkline + 点击弹出的 Webview 折线图
-- **自适应轮询**:窗口失焦后自动降频,减少对远程机器的干扰
+- **CPU**: overall usage and core count (delta-based `/proc/stat` calculation, not loadavg)
+- **Memory**: usage percentage and used/total (uses `MemAvailable` rather than `MemFree`, which better reflects what's actually available)
+- **Disk**: per-mount-point usage (virtual filesystems are filtered out automatically; shows the top 3 by usage by default, or specify mount points manually)
+- **Network**: upload/download rate (disabled by default to keep the tooltip uncluttered)
+- **GPU**: VRAM usage, utilization, temperature (requires `nvidia-smi`; the module simply stays inactive if it's unavailable)
+- **Docker**: running container count plus per-container CPU/memory usage (requires access to `/var/run/docker.sock`; degrades silently without permission)
+- **Threshold alerts**: the status bar changes color when CPU/memory crosses a threshold, with an optional system notification (fires once per crossing into the critical state, so it won't spam you)
+- **History trend**: a tooltip sparkline plus a Webview line chart on click
+- **Adaptive polling**: automatically throttles once the window loses focus, reducing load on the remote machine
 
-## 安装
+## Installation
 
-从 [Releases](../../releases) 下载 `.vsix` 文件,在 VSCode 中执行:
+Download the `.vsix` file from [Releases](../../releases), then in VS Code run:
 
 ```
 Extensions: Install from VSIX...
 ```
 
-或命令行安装:
+Or install from the command line:
 
 ```bash
 code --install-extension remote-pulse-0.1.0.vsix
 ```
 
-安装后通过 Remote-SSH 连接到 Linux 远程主机即可在状态栏看到指标(本插件声明为 `extensionKind: workspace`,会自动运行在远程 extension host 上,无需额外配置)。
+Once installed, connect to a Linux remote host over Remote-SSH and the metrics will show up in the status bar (the extension declares `extensionKind: workspace`, so it automatically runs on the remote extension host — no extra setup required).
 
-## 配置项
+## Configuration
 
-| 配置项 | 默认值 | 说明 |
+| Setting | Default | Description |
 |---|---|---|
-| `remotePulse.refreshInterval` | `2000` | 前台高频指标(CPU/内存)刷新间隔(ms) |
-| `remotePulse.backgroundInterval` | `15000` | 窗口失焦后的降频间隔(ms) |
-| `remotePulse.heavyMetricInterval` | `10000` | GPU/Docker 等低频指标独立轮询间隔(ms) |
-| `remotePulse.statusBarMetric` | `cpu` | 状态栏主指标:`cpu` \| `memory` |
-| `remotePulse.warningThreshold` | `80` | 告警阈值(%) |
-| `remotePulse.criticalThreshold` | `95` | 严重阈值(%) |
-| `remotePulse.template` | `"$(pulse) ${value}%"` | 状态栏显示模板 |
-| `remotePulse.enableGpu` | `true` | 是否探测并展示 GPU 信息 |
-| `remotePulse.enableDocker` | `true` | 是否探测并展示 Docker 容器信息 |
-| `remotePulse.enableNetwork` | `false` | 是否展示网络上下行速率 |
-| `remotePulse.enableNotifications` | `false` | 越过严重阈值时是否弹出系统通知 |
-| `remotePulse.diskMountPoints` | `[]` | 指定要监控的挂载点,留空则自动选 Top 3 |
+| `remotePulse.refreshInterval` | `2000` | Refresh interval for high-frequency foreground metrics (CPU/memory), in ms |
+| `remotePulse.backgroundInterval` | `15000` | Throttled refresh interval once the window loses focus, in ms |
+| `remotePulse.heavyMetricInterval` | `10000` | Independent polling interval for low-frequency metrics like GPU/Docker, in ms |
+| `remotePulse.statusBarMetric` | `cpu` | Primary metric shown in the status bar: `cpu` \| `memory` |
+| `remotePulse.warningThreshold` | `80` | Warning threshold (%) |
+| `remotePulse.criticalThreshold` | `95` | Critical threshold (%) |
+| `remotePulse.template` | `"$(pulse) ${value}%"` | Status bar display template |
+| `remotePulse.enableGpu` | `true` | Whether to detect and show GPU info |
+| `remotePulse.enableDocker` | `true` | Whether to detect and show Docker container info |
+| `remotePulse.enableNetwork` | `false` | Whether to show network upload/download rate |
+| `remotePulse.enableNotifications` | `false` | Whether to show a system notification when the critical threshold is crossed |
+| `remotePulse.diskMountPoints` | `[]` | Mount points to monitor; leave empty to auto-select the top 3 by usage |
 
-## 命令
+## Commands
 
-- `Remote Pulse: 显示趋势图`(`remotePulse.showTrend`,也绑定在状态栏点击上)
-- `Remote Pulse: 立即刷新`(`remotePulse.refresh`)
+- `Remote Pulse: Show Trend Chart` (`remotePulse.showTrend`, also bound to clicking the status bar item)
+- `Remote Pulse: Refresh Now` (`remotePulse.refresh`)
 
-## 边界情况
+## Edge Cases
 
-- **非 Linux 远程主机**:CPU/内存自动回退到 Node.js `os` 模块(精度略低),网络模块因无跨平台等价物而直接隐藏
-- **首次连接**:状态栏先显示 `$(sync~spin)` 加载态
-- **采集失败**(权限/网络抖动):显示 `$(circle-slash)`,tooltip 说明原因,不弹烦人的错误通知
-- **GPU/Docker 不可用**:启动时探测一次,不存在/无权限则该模块整体不激活,不反复重试
+- **Non-Linux remote hosts**: CPU/memory automatically fall back to Node.js's `os` module (slightly less precise); the network module is hidden entirely since there's no cross-platform equivalent
+- **First connection**: the status bar initially shows a `$(sync~spin)` loading state
+- **Collection failure** (permissions / network flakiness): shows `$(circle-slash)`, with the reason explained in the tooltip — no intrusive error notifications
+- **GPU/Docker unavailable**: probed once at startup; if missing or unauthorized, the module simply stays inactive rather than retrying repeatedly
 
-## 开发
+## Development
 
 ```bash
 npm install
-npm run build     # tsc 编译到 out/
-npm test          # 编译并运行 test/ 下的单元测试(node:test)
-npm run package   # vsce package 生成 .vsix
+npm run build     # compile with tsc into out/
+npm test          # build, then run the unit tests under test/ (node:test)
+npm run package   # vsce package to produce a .vsix
 ```
 
-在 VSCode 中打开本项目,按 `F5` 启动 Extension Development Host 即可实时调试(本地 macOS/Windows 环境下 CPU/内存会走 `os` 模块兜底路径,便于在没有远程 Linux 主机时也能验证核心交互)。
+Open this project in VS Code and press `F5` to launch an Extension Development Host for live debugging (locally on macOS/Windows, CPU/memory fall back to the `os` module path, so you can verify the core interactions even without a remote Linux host).
 
-## CI / 发布流水线
+## CI / Release Pipeline
 
-仓库里配了三个 workflow(`.github/workflows/`):
+The repository has three workflows configured (`.github/workflows/`):
 
-| Workflow | 触发条件 | 作用 |
+| Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | 每次 push / PR 到 `main` | `npm ci` → 编译 → 单元测试 → `vsce package` 冒烟检查 |
-| `release-please.yml` | push 到 `main` | 根据 [Conventional Commits](https://www.conventionalcommits.org/) 提交信息,自动维护一个"Release PR"(更新 `package.json` 版本号 + `CHANGELOG.md`);合并该 PR 后自动打 tag、建 GitHub Release |
-| `publish.yml` | GitHub Release 发布(`release: published`) | 编译 → 测试 → 打包 `.vsix` → 附加到 Release → 发布到 VS Code Marketplace(`vsce publish`)与 Open VSX(`ovsx publish`) |
+| `ci.yml` | Every push/PR to `main` | `npm ci` → build → unit tests → `vsce package` smoke check |
+| `release-please.yml` | Push to `main` | Maintains a "Release PR" automatically based on [Conventional Commits](https://www.conventionalcommits.org/) messages (bumps the `package.json` version + `CHANGELOG.md`); merging it automatically tags a version and creates a GitHub Release |
+| `publish.yml` | A GitHub Release is published (`release: published`) | Build → test → package the `.vsix` → attach it to the Release → publish to the VS Code Marketplace (`vsce publish`) and Open VSX (`ovsx publish`) |
 
-也就是说完整链路是:**日常提交遵循 Conventional Commits(`feat: xxx` / `fix: xxx` / `chore: xxx` …)→ release-please 开出版本 PR → 合并后自动发 GitHub Release → 自动推送到两个插件市场**。
+In short, the full pipeline is: **everyday commits follow Conventional Commits (`feat: xxx` / `fix: xxx` / `chore: xxx`, …) → release-please opens a version PR → merging it cuts a GitHub Release automatically → that automatically pushes to both marketplaces**.
 
-### 一次性手动准备(仓库 Secrets)
+### One-Time Manual Setup (Repository Secrets)
 
-自动发布到两个市场之前,需要先手动完成(仅需一次):
+Before automatic publishing to both marketplaces can work, a few things need to be done manually, once:
 
-1. **VS Code Marketplace**:在 [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage) 注册一个 publisher(需确认与 `package.json` 里的 `"publisher": "tanzz-dev"` 一致,或改成你实际注册的 publisher id),再在 Azure DevOps 生成一个 **Marketplace (Manage)** 权限的 PAT。
-2. **Open VSX**:在 [open-vsx.org](https://open-vsx.org) 用 Eclipse 账号登录,认领与 publisher 同名的 namespace(`npx ovsx create-namespace tanzz-dev -p <token>` 或网页操作),再生成一个 access token。
-3. 把两个 token 写入仓库 Secrets(建议在自己终端执行,不要把 token 贴进聊天):
+1. **VS Code Marketplace**: register a publisher at [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage) (make sure it matches `"publisher": "tanzz-dev"` in `package.json`, or update that field to your actual publisher id), then generate a PAT in Azure DevOps with **Marketplace (Manage)** scope.
+2. **Open VSX**: sign in at [open-vsx.org](https://open-vsx.org) with an Eclipse account, claim a namespace matching the publisher name (`npx ovsx create-namespace tanzz-dev -p <token>`, or do it via the web UI), then generate an access token.
+3. Add both tokens to the repository Secrets (run this in your own terminal — don't paste tokens into chat):
    ```bash
    gh secret set VSCE_PAT --repo tzzs/remote-pulse
    gh secret set OVSX_PAT --repo tzzs/remote-pulse
    ```
 
-在这两个 Secrets 配置好之前,`publish.yml` 会在 Marketplace/Open VSX 发布这两步失败(其余步骤——编译、测试、打包、上传 `.vsix` 到 Release——不受影响),属于预期行为。
+Until both secrets are configured, `publish.yml` will fail at the Marketplace/Open VSX publish steps (the rest — build, test, package, and uploading the `.vsix` to the Release — is unaffected). That's expected.
 
-## 许可
+## License
 
 [MIT](LICENSE)
