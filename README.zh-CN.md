@@ -125,8 +125,8 @@ npm run package   # vsce package 生成 .vsix
 
 自动发布到两个市场之前,需要先手动完成(仅需一次):
 
-1. **VS Code Marketplace**:在 [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage) 注册一个 publisher(需确认与 `package.json` 里的 `"publisher": "tanzz-dev"` 一致,或改成你实际注册的 publisher id),再在 Azure DevOps 生成一个 **Marketplace (Manage)** 权限的 PAT。
-2. **Open VSX**:在 [open-vsx.org](https://open-vsx.org) 用 Eclipse 账号登录,认领与 publisher 同名的 namespace(`npx ovsx create-namespace tanzz-dev -p <token>` 或网页操作),再生成一个 access token。
+1. **VS Code Marketplace**:在 [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage) 注册一个 publisher(需确认与 `package.json` 里的 `"publisher": "tanzz"` 一致,或改成你实际注册的 publisher id),再在 Azure DevOps 生成一个 **Marketplace (Manage)** 权限的 PAT。
+2. **Open VSX**:在 [open-vsx.org](https://open-vsx.org) 用 Eclipse 账号登录,认领与 publisher 同名的 namespace(`npx ovsx create-namespace tanzz -p <token>` 或网页操作),再生成一个 access token。
 3. 把两个 token 写入仓库 Secrets(建议在自己终端执行,不要把 token 贴进聊天):
    ```bash
    gh secret set VSCE_PAT --repo tzzs/remote-pulse

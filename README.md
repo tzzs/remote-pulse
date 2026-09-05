@@ -125,8 +125,8 @@ In short, the full pipeline is: **everyday commits follow Conventional Commits (
 
 Before automatic publishing to both marketplaces can work, a few things need to be done manually, once:
 
-1. **VS Code Marketplace**: register a publisher at [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage) (make sure it matches `"publisher": "tanzz-dev"` in `package.json`, or update that field to your actual publisher id), then generate a PAT in Azure DevOps with **Marketplace (Manage)** scope.
-2. **Open VSX**: sign in at [open-vsx.org](https://open-vsx.org) with an Eclipse account, claim a namespace matching the publisher name (`npx ovsx create-namespace tanzz-dev -p <token>`, or do it via the web UI), then generate an access token.
+1. **VS Code Marketplace**: register a publisher at [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage) (make sure it matches `"publisher": "tanzz"` in `package.json`, or update that field to your actual publisher id), then generate a PAT in Azure DevOps with **Marketplace (Manage)** scope.
+2. **Open VSX**: sign in at [open-vsx.org](https://open-vsx.org) with an Eclipse account, claim a namespace matching the publisher name (`npx ovsx create-namespace tanzz -p <token>`, or do it via the web UI), then generate an access token.
 3. Add both tokens to the repository Secrets (run this in your own terminal — don't paste tokens into chat):
    ```bash
    gh secret set VSCE_PAT --repo tzzs/remote-pulse

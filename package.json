@@ -3,7 +3,7 @@
   "displayName": "Remote Pulse",
   "description": "远程脉搏 —— 以原生延迟指示器般安静的方式,持续感知 Remote-SSH 远程主机的 CPU/内存/磁盘/网络/GPU/Docker 状态",
   "version": "0.1.0",
-  "publisher": "tanzz-dev",
+  "publisher": "tanzz",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
