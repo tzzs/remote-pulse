@@ -2,28 +2,41 @@
   "name": "remote-pulse",
   "displayName": "Remote Pulse",
   "description": "%extension.description%",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "tanzz",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
-  "keywords": ["remote-ssh", "monitor", "status bar", "cpu", "gpu", "docker"],
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "remote-ssh",
+    "monitor",
+    "status bar",
+    "cpu",
+    "gpu",
+    "docker"
+  ],
   "icon": "images/icon.png",
   "l10n": "./l10n",
   "repository": {
     "type": "git",
     "url": "https://github.com/tzzs/remote-pulse.git"
   },
-  "extensionKind": ["workspace"],
+  "extensionKind": [
+    "workspace"
+  ],
   "capabilities": {
     "virtualWorkspaces": false,
     "untrustedWorkspaces": {
       "supported": true
     }
   },
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -61,7 +74,10 @@
         },
         "remotePulse.statusBarMetric": {
           "type": "string",
-          "enum": ["cpu", "memory"],
+          "enum": [
+            "cpu",
+            "memory"
+          ],
           "default": "cpu",
           "description": "%config.statusBarMetric.description%"
         },
@@ -106,7 +122,9 @@
         },
         "remotePulse.diskMountPoints": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "%config.diskMountPoints.description%"
         }

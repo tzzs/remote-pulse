@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/tzzs/remote-pulse/compare/v0.1.0...v0.1.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* correct publisher id to tanzz ([#4](https://github.com/tzzs/remote-pulse/issues/4)) ([557f208](https://github.com/tzzs/remote-pulse/commit/557f208e22146046e800646e9de7319afe09a599))
+
 ## 0.1.0
 
 初始版本,实现完整功能集:
