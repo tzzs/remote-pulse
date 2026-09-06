@@ -96,17 +96,16 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(before, after, 'item.tooltip should be the same object reference, only its .value should change');
   });
 
-  test('tooltip renders the host, CPU and memory as table rows', () => {
+  test('tooltip renders the host, CPU and memory as list items', () => {
     bar = new PulseStatusBar();
     bar.update('host-1', snapshotWith(), baseConfig(), 'ok');
     const tooltip = (bar.debugState.tooltip as vscode.MarkdownString).value;
     assert.match(tooltip, /Remote host: host-1/);
-    assert.match(tooltip, /\| Metric \| Value \|/);
-    assert.match(tooltip, /\| CPU \|.*10%.*\(4 cores\).*\|/);
-    assert.match(tooltip, /\| Memory \|.*10%.*\|/);
+    assert.match(tooltip, /^- CPU\s.*10%.*\(4 cores\)/m);
+    assert.match(tooltip, /^- Memory\s.*10%/m);
   });
 
-  test('each disk gets its own table row instead of running together on one line', () => {
+  test('each disk gets its own list item instead of running together on one line', () => {
     bar = new PulseStatusBar();
     bar.update(
       'host',
@@ -122,23 +121,21 @@ suite('PulseStatusBar (integration)', () => {
     const lines = (bar.debugState.tooltip as vscode.MarkdownString).value.split('\n');
     const cLine = lines.find(l => l.includes('/mnt/c'));
     const jLine = lines.find(l => l.includes('/mnt/j'));
-    assert.ok(cLine && /87%/.test(cLine));
-    assert.ok(jLine && /86%/.test(jLine));
-    assert.notEqual(cLine, jLine, 'each disk should be a separate table row, not sharing a line');
+    assert.ok(cLine?.startsWith('- ') && /87%/.test(cLine));
+    assert.ok(jLine?.startsWith('- ') && /86%/.test(jLine));
+    assert.notEqual(cLine, jLine, 'each disk should be a separate list item, not sharing a line');
   });
 
-  test('GPU utilization, VRAM and temperature each get their own row', () => {
+  test('GPU utilization, VRAM and temperature each get their own indented sub-item', () => {
     bar = new PulseStatusBar();
     bar.update('host', snapshotWith({ gpus: [{ index: 0, name: 'RTX 5060 Ti', utilizationPercent: 6, memoryUsedMb: 2293, memoryTotalMb: 16311, temperatureC: 47 }] }), baseConfig(), 'ok');
     const lines = (bar.debugState.tooltip as vscode.MarkdownString).value.split('\n');
     const utilLine = lines.find(l => l.includes('GPU #0'));
     const vramLine = lines.find(l => l.includes('VRAM'));
     const tempLine = lines.find(l => l.includes('Temp'));
-    assert.ok(utilLine && /6%/.test(utilLine));
-    assert.ok(vramLine && /2293\/16311 MB/.test(vramLine));
-    assert.ok(tempLine && /47°C/.test(tempLine));
-    assert.notEqual(utilLine, vramLine);
-    assert.notEqual(vramLine, tempLine);
+    assert.ok(utilLine?.startsWith('- ') && /6%/.test(utilLine));
+    assert.ok(vramLine?.startsWith('  - ') && /2293\/16311 MB/.test(vramLine), 'VRAM should be an indented sub-item of the GPU line');
+    assert.ok(tempLine?.startsWith('  - ') && /47°C/.test(tempLine), 'Temp should be an indented sub-item of the GPU line');
   });
 
   test('the tooltip sparkline is capped to the samples it is given, not unbounded', () => {
@@ -146,7 +143,7 @@ suite('PulseStatusBar (integration)', () => {
     const cpuHistory = Array.from({ length: 20 }, (_, i) => i * 5);
     bar.update('host', snapshotWith(), baseConfig(), 'ok', { cpu: cpuHistory, memory: [] });
     const tooltip = (bar.debugState.tooltip as vscode.MarkdownString).value;
-    const cpuLine = tooltip.split('\n').find(line => line.startsWith('| CPU |'));
+    const cpuLine = tooltip.split('\n').find(line => line.startsWith('- CPU'));
     assert.ok(cpuLine);
     const sparkChars = cpuLine!.match(/[▁▂▃▄▅▆▇█]/g) ?? [];
     assert.equal(sparkChars.length, cpuHistory.length);
@@ -157,5 +154,10 @@ suite('PulseStatusBar (integration)', () => {
     bar.showError('permission denied');
     assert.equal(bar.debugState.text, '$(circle-slash)');
     assert.match((bar.debugState.tooltip as vscode.MarkdownString).value, /permission denied/);
+  });
+
+  test('clicking the status bar item does nothing for now (the trend panel entry point is disabled)', () => {
+    bar = new PulseStatusBar();
+    assert.equal(bar.debugState.command, undefined);
   });
 });

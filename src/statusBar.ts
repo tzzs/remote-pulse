@@ -5,8 +5,6 @@ import { calcAlertLevel, maxAlertLevel, foregroundColorIdFor, backgroundColorIdF
 import { renderSparkline, formatBytes, formatRate, formatUptime } from './util/sparkline';
 import { renderStatusBarText } from './util/statusBarText';
 
-const SHOW_TREND_COMMAND = 'remotePulse.showTrend';
-
 export class PulseStatusBar {
   private readonly item: vscode.StatusBarItem;
   /** 复用同一个 MarkdownString 实例,只改 .value,不重新赋值 item.tooltip——避免 hover 弹出期间被强制刷新导致闪烁。 */
@@ -15,7 +13,6 @@ export class PulseStatusBar {
   constructor() {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
     this.item.name = 'Remote Pulse';
-    this.item.command = SHOW_TREND_COMMAND;
     this.tooltipMarkdown = new vscode.MarkdownString();
     this.tooltipMarkdown.isTrusted = false;
     this.item.tooltip = this.tooltipMarkdown;
@@ -88,6 +85,7 @@ export class PulseStatusBar {
     tooltip: string | vscode.MarkdownString | undefined;
     alignment: vscode.StatusBarAlignment;
     priority: number | undefined;
+    command: string | vscode.Command | undefined;
   } {
     return {
       text: this.item.text,
@@ -96,12 +94,14 @@ export class PulseStatusBar {
       tooltip: this.item.tooltip,
       alignment: this.item.alignment,
       priority: this.item.priority,
+      command: this.item.command,
     };
   }
 
   /**
-   * 用 markdown 表格而不是一堆手动拼空格的文本行:每个指标独占一格,GPU/Docker 这类
-   * 多子项的信息拆成子行(↳ 前缀),彻底避免"挤在同一段落里"和"对不齐"的问题。
+   * 用嵌套的 markdown 列表:表格在部分主题下会把单元格文字渲染得偏浅、长文本还会在列内断行错位,
+   * 列表没有这些问题——连续的 "- " 行本来就会被解析成独立列表项,不需要额外的硬换行技巧;
+   * GPU/Docker 这类多子项信息用两格缩进的子列表(↳ 效果由缩进本身体现,不用箭头符号)分开。
    */
   private buildTooltip(
     hostLabel: string,
@@ -109,49 +109,41 @@ export class PulseStatusBar {
     config: RemotePulseConfig,
     sparklines: { cpu: number[]; memory: number[] },
   ): string {
-    const rows: [string, string][] = [];
+    const lines: string[] = [];
+    lines.push(`**${vscode.l10n.t('Remote host: {0}', hostLabel)}**`, '');
 
     if (snapshot.cpu) {
       const cpuSpark = renderSparkline(sparklines.cpu.length > 0 ? sparklines.cpu : [snapshot.cpu.percent]);
-      rows.push(['CPU', `${cpuSpark} ${Math.round(snapshot.cpu.percent)}% (${vscode.l10n.t('{0} cores', snapshot.cpu.cores)})`]);
+      lines.push(`- CPU  ${cpuSpark} ${Math.round(snapshot.cpu.percent)}% (${vscode.l10n.t('{0} cores', snapshot.cpu.cores)})`);
     }
     if (snapshot.memory) {
       const memSpark = renderSparkline(sparklines.memory.length > 0 ? sparklines.memory : [snapshot.memory.percent]);
-      rows.push([
-        vscode.l10n.t('Memory'),
-        `${memSpark} ${Math.round(snapshot.memory.percent)}% (${formatBytes(snapshot.memory.used)} / ${formatBytes(snapshot.memory.total)})`,
-      ]);
+      lines.push(
+        `- ${vscode.l10n.t('Memory')}  ${memSpark} ${Math.round(snapshot.memory.percent)}% (${formatBytes(snapshot.memory.used)} / ${formatBytes(snapshot.memory.total)})`,
+      );
     }
     for (const disk of snapshot.disks ?? []) {
-      rows.push([vscode.l10n.t('Disk {0}', disk.mountPoint), `${Math.round(disk.percent)}% (${formatBytes(disk.used)} / ${formatBytes(disk.total)})`]);
+      lines.push(`- ${vscode.l10n.t('Disk {0}', disk.mountPoint)}  ${Math.round(disk.percent)}% (${formatBytes(disk.used)} / ${formatBytes(disk.total)})`);
     }
     if (config.enableNetwork && snapshot.network) {
-      rows.push([vscode.l10n.t('Network'), `↓ ${formatRate(snapshot.network.rxRate)}  ↑ ${formatRate(snapshot.network.txRate)}`]);
+      lines.push(`- ${vscode.l10n.t('Network')}  ↓ ${formatRate(snapshot.network.rxRate)}  ↑ ${formatRate(snapshot.network.txRate)}`);
     }
     if (config.enableGpu) {
       for (const gpu of snapshot.gpus ?? []) {
-        rows.push([`GPU #${gpu.index}${gpu.name ? ` (${gpu.name})` : ''}`, vscode.l10n.t('{0}% utilization', gpu.utilizationPercent)]);
-        rows.push([`↳ ${vscode.l10n.t('VRAM')}`, `${gpu.memoryUsedMb}/${gpu.memoryTotalMb} MB`]);
-        rows.push([`↳ ${vscode.l10n.t('Temp')}`, `${gpu.temperatureC}°C`]);
+        lines.push(`- GPU #${gpu.index}${gpu.name ? ` (${gpu.name})` : ''}  ${vscode.l10n.t('{0}% utilization', gpu.utilizationPercent)}`);
+        lines.push(`  - ${vscode.l10n.t('VRAM')}  ${gpu.memoryUsedMb}/${gpu.memoryTotalMb} MB`);
+        lines.push(`  - ${vscode.l10n.t('Temp')}  ${gpu.temperatureC}°C`);
       }
     }
     if (config.enableDocker && snapshot.docker) {
-      rows.push(['Docker', vscode.l10n.t('Running containers: {0}', snapshot.docker.containerCount)]);
+      lines.push(`- Docker  ${vscode.l10n.t('Running containers: {0}', snapshot.docker.containerCount)}`);
       for (const c of snapshot.docker.containers.slice(0, 5)) {
-        rows.push([`↳ ${c.name}`, `CPU ${c.cpuPercent.toFixed(1)}%  ${vscode.l10n.t('Memory')} ${formatBytes(c.memoryUsedBytes)}`]);
+        lines.push(`  - ${c.name}  CPU ${c.cpuPercent.toFixed(1)}%  ${vscode.l10n.t('Memory')} ${formatBytes(c.memoryUsedBytes)}`);
       }
     }
     if (snapshot.uptimeSeconds !== undefined) {
-      rows.push([vscode.l10n.t('Uptime'), formatUptime(snapshot.uptimeSeconds)]);
+      lines.push(`- ${vscode.l10n.t('Uptime')}  ${formatUptime(snapshot.uptimeSeconds)}`);
     }
-
-    const lines: string[] = [];
-    lines.push(`**${vscode.l10n.t('Remote host: {0}', hostLabel)}**`, '');
-    lines.push(`| ${vscode.l10n.t('Metric')} | ${vscode.l10n.t('Value')} |`, '|---|---|');
-    for (const [label, value] of rows) {
-      lines.push(`| ${label} | ${value} |`);
-    }
-    lines.push('', '---', vscode.l10n.t('Click to view trend chart'));
 
     return lines.join('\n');
   }
