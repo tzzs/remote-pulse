@@ -104,6 +104,7 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 npm install
 npm run build     # compile with tsc into out/
 npm test          # build, then run the unit tests under test/ (node:test)
+npm run test:integration  # runs test/integration/ in a real VS Code extension host (@vscode/test-cli)
 npm run package   # vsce package to produce a .vsix
 ```
 
@@ -115,7 +116,7 @@ The repository has three workflows configured (`.github/workflows/`):
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | Every push/PR to `main` | `npm ci` → build → unit tests → `vsce package` smoke check |
+| `ci.yml` | Every push/PR to `main` | `npm ci` → build → unit tests → integration tests (real VS Code extension host) → `vsce package` → uploads the `.vsix` as a workflow artifact and comments the download link on the PR |
 | `release-please.yml` | Push to `main` | Maintains a "Release PR" automatically based on [Conventional Commits](https://www.conventionalcommits.org/) messages (bumps the `package.json` version + `CHANGELOG.md`); merging it automatically tags a version and creates a GitHub Release |
 | `publish.yml` | A GitHub Release is published (`release: published`) | Build → test → package the `.vsix` → attach it to the Release → publish to the VS Code Marketplace (`vsce publish`) and Open VSX (`ovsx publish`) |
 

@@ -50,3 +50,22 @@ const ALERT_LEVEL_RANK: Record<AlertLevel, number> = { normal: 0, warning: 1, cr
 export function maxAlertLevel(...levels: AlertLevel[]): AlertLevel {
   return levels.reduce((worst, level) => (ALERT_LEVEL_RANK[level] > ALERT_LEVEL_RANK[worst] ? level : worst), 'normal' as AlertLevel);
 }
+
+/**
+ * VS Code 状态栏没有官方的"正常态"前景色,只能自己挑一个语义色;
+ * 返回主题色 id(不直接依赖 vscode 模块),由调用方套进 new vscode.ThemeColor(id)。
+ */
+export function foregroundColorIdFor(level: AlertLevel): string | undefined {
+  return level === 'normal' ? 'charts.green' : undefined;
+}
+
+/** VS Code 状态栏背景色官方只承认 error/warning 两种语义色,normal 态没有对应背景。 */
+export function backgroundColorIdFor(level: AlertLevel): string | undefined {
+  if (level === 'critical') {
+    return 'statusBarItem.errorBackground';
+  }
+  if (level === 'warning') {
+    return 'statusBarItem.warningBackground';
+  }
+  return undefined;
+}

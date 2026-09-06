@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { AlertLevel, CollectionState, Snapshot } from './types';
 import { RemotePulseConfig } from './config';
-import { calcAlertLevel, maxAlertLevel } from './store/statsStore';
+import { calcAlertLevel, maxAlertLevel, foregroundColorIdFor, backgroundColorIdFor } from './store/statsStore';
 import { renderSparkline, formatBytes, formatRate, formatUptime } from './util/sparkline';
+import { renderStatusBarText } from './util/statusBarText';
 
 const SHOW_TREND_COMMAND = 'remotePulse.showTrend';
 
@@ -63,32 +64,39 @@ export class PulseStatusBar {
     const cpuText = cpuPercent !== undefined ? String(Math.round(cpuPercent)).padStart(2, ' ') : '--';
     const memText = memPercent !== undefined ? String(Math.round(memPercent)).padStart(2, ' ') : '--';
 
-    let text = config.template.replace('${cpu}', cpuText).replace('${mem}', memText);
-    if (level === 'critical') {
-      text = text.replace(/^\$\([a-zA-Z-]+\)/, '$(warning)');
-    }
-    this.item.text = text;
+    this.item.text = renderStatusBarText(config.template, cpuText, memText, level === 'critical');
     this.item.color = this.colorFor(level);
     this.item.backgroundColor = this.backgroundColorFor(level);
     this.tooltipMarkdown.value = this.buildTooltip(hostLabel, snapshot, config, sparklines);
   }
 
-  /** VS Code 状态栏只承认 error/warning 两种语义背景色,没有官方的"正常态背景色",所以正常态改用绿色前景文字区分。 */
   private colorFor(level: AlertLevel): vscode.ThemeColor | undefined {
-    if (level === 'normal') {
-      return new vscode.ThemeColor('charts.green');
-    }
-    return undefined;
+    const id = foregroundColorIdFor(level);
+    return id ? new vscode.ThemeColor(id) : undefined;
   }
 
   private backgroundColorFor(level: AlertLevel): vscode.ThemeColor | undefined {
-    if (level === 'critical') {
-      return new vscode.ThemeColor('statusBarItem.errorBackground');
-    }
-    if (level === 'warning') {
-      return new vscode.ThemeColor('statusBarItem.warningBackground');
-    }
-    return undefined;
+    const id = backgroundColorIdFor(level);
+    return id ? new vscode.ThemeColor(id) : undefined;
+  }
+
+  /** 仅供集成测试读取当前渲染状态用,不做其他用途。 */
+  get debugState(): {
+    text: string;
+    color: string | vscode.ThemeColor | undefined;
+    backgroundColor: vscode.ThemeColor | undefined;
+    tooltip: string | vscode.MarkdownString | undefined;
+    alignment: vscode.StatusBarAlignment;
+    priority: number | undefined;
+  } {
+    return {
+      text: this.item.text,
+      color: this.item.color,
+      backgroundColor: this.item.backgroundColor,
+      tooltip: this.item.tooltip,
+      alignment: this.item.alignment,
+      priority: this.item.priority,
+    };
   }
 
   private buildTooltip(

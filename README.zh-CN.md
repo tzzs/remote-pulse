@@ -104,6 +104,7 @@ code --install-extension remote-pulse-0.1.0.vsix
 npm install
 npm run build     # tsc 编译到 out/
 npm test          # 编译并运行 test/ 下的单元测试(node:test)
+npm run test:integration  # 在真实 VS Code 扩展宿主里跑 test/integration/(@vscode/test-cli)
 npm run package   # vsce package 生成 .vsix
 ```
 
@@ -115,7 +116,7 @@ npm run package   # vsce package 生成 .vsix
 
 | Workflow | 触发条件 | 作用 |
 |---|---|---|
-| `ci.yml` | 每次 push / PR 到 `main` | `npm ci` → 编译 → 单元测试 → `vsce package` 冒烟检查 |
+| `ci.yml` | 每次 push / PR 到 `main` | `npm ci` → 编译 → 单元测试 → 集成测试(真实 VS Code 扩展宿主)→ `vsce package` → 把 `.vsix` 传成 workflow artifact,并在 PR 里评论下载链接 |
 | `release-please.yml` | push 到 `main` | 根据 [Conventional Commits](https://www.conventionalcommits.org/) 提交信息,自动维护一个"Release PR"(更新 `package.json` 版本号 + `CHANGELOG.md`);合并该 PR 后自动打 tag、建 GitHub Release |
 | `publish.yml` | GitHub Release 发布(`release: published`) | 编译 → 测试 → 打包 `.vsix` → 附加到 Release → 发布到 VS Code Marketplace(`vsce publish`)与 Open VSX(`ovsx publish`) |
 

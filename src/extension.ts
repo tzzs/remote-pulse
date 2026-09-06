@@ -12,6 +12,7 @@ import { PulseStatusBar } from './statusBar';
 import { readConfig, isRemotePulseConfigChange } from './config';
 import { CollectionState, Snapshot } from './types';
 import { TrendPanel, TrendSeries } from './webview/trendPanel';
+import { formatHostLabel } from './util/hostLabel';
 
 const TREND_WINDOW_MS = 30 * 60 * 1000;
 /** tooltip 里的 sparkline 只需要"最近走势"的观感,取全部窗口样本会让字符串随开机时长无限变长。 */
@@ -161,9 +162,7 @@ function resolveHostLabel(): string {
     const ip = findNonInternalIPv4();
     // WSL 里 os.hostname() 读到的是发行版自己的主机名(很多发行版默认沿用/继承 Windows 主机名),
     // 标出 WSL_DISTRO_NAME 能让用户一眼确认这确实是 WSL 侧数据,而不是误连到了外层 Windows。
-    const wslDistro = process.env.WSL_DISTRO_NAME;
-    const label = wslDistro ? `${hostname} [WSL:${wslDistro}]` : hostname;
-    return ip ? `${label} (${ip})` : label;
+    return formatHostLabel(hostname, ip, process.env.WSL_DISTRO_NAME);
   } catch {
     return vscode.l10n.t('Remote host');
   }
