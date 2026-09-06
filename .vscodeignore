@@ -14,3 +14,5 @@ node_modules/**
 docs/**
 release-please-config.json
 .release-please-manifest.json
+.vscode-test.mjs
+.vscode-test/**

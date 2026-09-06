@@ -43,3 +43,26 @@ export function calcAlertLevel(percent: number, warningThreshold: number, critic
   }
   return 'normal';
 }
+
+const ALERT_LEVEL_RANK: Record<AlertLevel, number> = { normal: 0, warning: 1, critical: 2 };
+
+/** 多个指标(CPU/内存)各自的告警级别取最严重的一个,决定状态栏整体的颜色。 */
+export function maxAlertLevel(...levels: AlertLevel[]): AlertLevel {
+  return levels.reduce((worst, level) => (ALERT_LEVEL_RANK[level] > ALERT_LEVEL_RANK[worst] ? level : worst), 'normal' as AlertLevel);
+}
+
+/**
+ * VS Code 状态栏背景色官方只承认 error/warning 两种语义色,normal 态没有对应背景。
+ * 正常态特意不设自定义前景色——状态栏背景会被 Vim 模式、Remote 连接等其他扩展/场景动态改变,
+ * 而 vscode API 不提供读取"当前实际背景色"的方式,自己挑一个固定颜色必然会在某些背景下失去对比度;
+ * 不设置就直接沿用主题的 statusBar.foreground,那才是跟着背景联动、始终保证可读的颜色。
+ */
+export function backgroundColorIdFor(level: AlertLevel): string | undefined {
+  if (level === 'critical') {
+    return 'statusBarItem.errorBackground';
+  }
+  if (level === 'warning') {
+    return 'statusBarItem.warningBackground';
+  }
+  return undefined;
+}

@@ -1,11 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { StatsStore, calcAlertLevel } from '../src/store/statsStore';
+import { StatsStore, calcAlertLevel, maxAlertLevel, backgroundColorIdFor } from '../src/store/statsStore';
 
 test('calcAlertLevel 按阈值分级', () => {
   assert.equal(calcAlertLevel(50, 80, 95), 'normal');
   assert.equal(calcAlertLevel(80, 80, 95), 'warning');
   assert.equal(calcAlertLevel(95, 80, 95), 'critical');
+});
+
+test('maxAlertLevel 取多个级别里最严重的一个', () => {
+  assert.equal(maxAlertLevel('normal', 'normal'), 'normal');
+  assert.equal(maxAlertLevel('normal', 'warning'), 'warning');
+  assert.equal(maxAlertLevel('critical', 'warning'), 'critical');
+  assert.equal(maxAlertLevel('normal', 'critical', 'warning'), 'critical');
+});
+
+test('backgroundColorIdFor 按级别映射官方支持的语义背景色', () => {
+  assert.equal(backgroundColorIdFor('normal'), undefined);
+  assert.equal(backgroundColorIdFor('warning'), 'statusBarItem.warningBackground');
+  assert.equal(backgroundColorIdFor('critical'), 'statusBarItem.errorBackground');
 });
 
 test('StatsStore.recentValues 只返回窗口内且已定义的数值', () => {

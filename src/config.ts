@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
+import { DEFAULT_STATUS_BAR_TEMPLATE } from './util/statusBarText';
 
 export interface RemotePulseConfig {
   refreshInterval: number;
   backgroundInterval: number;
   heavyMetricInterval: number;
-  statusBarMetric: 'cpu' | 'memory';
   warningThreshold: number;
   criticalThreshold: number;
   template: string;
@@ -23,10 +23,9 @@ export function readConfig(): RemotePulseConfig {
     refreshInterval: cfg.get<number>('refreshInterval', 2000),
     backgroundInterval: cfg.get<number>('backgroundInterval', 15000),
     heavyMetricInterval: cfg.get<number>('heavyMetricInterval', 10000),
-    statusBarMetric: cfg.get<'cpu' | 'memory'>('statusBarMetric', 'cpu'),
     warningThreshold: cfg.get<number>('warningThreshold', 80),
     criticalThreshold: cfg.get<number>('criticalThreshold', 95),
-    template: cfg.get<string>('template', '$(pulse) ${value}%'),
+    template: cfg.get<string>('template', DEFAULT_STATUS_BAR_TEMPLATE),
     enableGpu: cfg.get<boolean>('enableGpu', true),
     enableDocker: cfg.get<boolean>('enableDocker', true),
     enableNetwork: cfg.get<boolean>('enableNetwork', false),

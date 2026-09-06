@@ -12,10 +12,18 @@ import { PulseStatusBar } from './statusBar';
 import { readConfig, isRemotePulseConfigChange } from './config';
 import { CollectionState, Snapshot } from './types';
 import { TrendPanel, TrendSeries } from './webview/trendPanel';
+import { formatHostLabel } from './util/hostLabel';
 
 const TREND_WINDOW_MS = 30 * 60 * 1000;
+/** tooltip 里的 sparkline 只需要"最近走势"的观感,取全部窗口样本会让字符串随开机时长无限变长。 */
+const SPARKLINE_POINTS = 20;
 
-export function activate(context: vscode.ExtensionContext): void {
+/** 本地(非远程)窗口里没有"远程主机"可言,不应该出现状态栏/占用轮询资源。 */
+export function activate(context: vscode.ExtensionContext): { monitoring: boolean } {
+  if (!vscode.env.remoteName) {
+    return { monitoring: false };
+  }
+
   const statusBar = new PulseStatusBar();
   const store = new StatsStore();
 
@@ -49,8 +57,8 @@ export function activate(context: vscode.ExtensionContext): void {
     store.push(snapshot);
 
     const sparklines = {
-      cpu: store.recentValues(TREND_WINDOW_MS, s => s.cpu?.percent),
-      memory: store.recentValues(TREND_WINDOW_MS, s => s.memory?.percent),
+      cpu: store.recentValues(TREND_WINDOW_MS, s => s.cpu?.percent).slice(-SPARKLINE_POINTS),
+      memory: store.recentValues(TREND_WINDOW_MS, s => s.memory?.percent).slice(-SPARKLINE_POINTS),
     };
     statusBar.update(hostLabel, snapshot, config, state, sparklines);
     maybeNotifyCritical(snapshot);
@@ -63,17 +71,21 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!config.enableNotifications) {
       return;
     }
-    const percent = config.statusBarMetric === 'memory' ? snapshot.memory?.percent : snapshot.cpu?.percent;
-    if (percent === undefined) {
-      return;
+    const cpuPercent = snapshot.cpu?.percent;
+    const memPercent = snapshot.memory?.percent;
+    const criticalParts: string[] = [];
+    if (cpuPercent !== undefined && cpuPercent >= config.criticalThreshold) {
+      criticalParts.push(`CPU ${Math.round(cpuPercent)}%`);
     }
-    const isCritical = percent >= config.criticalThreshold;
+    if (memPercent !== undefined && memPercent >= config.criticalThreshold) {
+      criticalParts.push(`${vscode.l10n.t('Memory')} ${Math.round(memPercent)}%`);
+    }
+    const isCritical = criticalParts.length > 0;
     // 只在"跨越"到严重态的那一刻通知一次,而不是每轮轮询都弹窗,避免持续过载时通知刷屏。
     // 恢复到阈值以下后重新越界会再次触发,保证用户始终能看到最新一次告警。
     if (isCritical && !lastWasCritical) {
-      const metricLabel = config.statusBarMetric === 'memory' ? vscode.l10n.t('Memory') : 'CPU';
       void vscode.window.showWarningMessage(
-        `Remote Pulse: ${vscode.l10n.t('{0} usage on {1} has reached {2}%', metricLabel, hostLabel, Math.round(percent))}`,
+        `Remote Pulse: ${vscode.l10n.t('{0} on {1} has reached the critical threshold', criticalParts.join(', '), hostLabel)}`,
       );
     }
     lastWasCritical = isCritical;
@@ -142,6 +154,8 @@ export function activate(context: vscode.ExtensionContext): void {
     lightPoller,
     heavyPoller,
   );
+
+  return { monitoring: true };
 }
 
 export function deactivate(): void {
@@ -153,7 +167,9 @@ function resolveHostLabel(): string {
   try {
     const hostname = os.hostname();
     const ip = findNonInternalIPv4();
-    return ip ? `${hostname} (${ip})` : hostname;
+    // WSL 里 os.hostname() 读到的是发行版自己的主机名(很多发行版默认沿用/继承 Windows 主机名),
+    // 标出 WSL_DISTRO_NAME 能让用户一眼确认这确实是 WSL 侧数据,而不是误连到了外层 Windows。
+    return formatHostLabel(hostname, ip, process.env.WSL_DISTRO_NAME);
   } catch {
     return vscode.l10n.t('Remote host');
   }

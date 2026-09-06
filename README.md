@@ -77,10 +77,9 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 | `remotePulse.refreshInterval` | `2000` | Refresh interval for high-frequency foreground metrics (CPU/memory), in ms |
 | `remotePulse.backgroundInterval` | `15000` | Throttled refresh interval once the window loses focus, in ms |
 | `remotePulse.heavyMetricInterval` | `10000` | Independent polling interval for low-frequency metrics like GPU/Docker, in ms |
-| `remotePulse.statusBarMetric` | `cpu` | Primary metric shown in the status bar: `cpu` \| `memory` |
 | `remotePulse.warningThreshold` | `80` | Warning threshold (%) |
 | `remotePulse.criticalThreshold` | `95` | Critical threshold (%) |
-| `remotePulse.template` | `"$(pulse) ${value}%"` | Status bar display template |
+| `remotePulse.template` | `"$(pulse) CPU ${cpu}%  MEM ${mem}%"` | Status bar display template (`${cpu}` / `${mem}`) |
 | `remotePulse.enableGpu` | `true` | Whether to detect and show GPU info |
 | `remotePulse.enableDocker` | `true` | Whether to detect and show Docker container info |
 | `remotePulse.enableNetwork` | `false` | Whether to show network upload/download rate |
@@ -105,6 +104,7 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 npm install
 npm run build     # compile with tsc into out/
 npm test          # build, then run the unit tests under test/ (node:test)
+npm run test:integration  # runs test/integration/ in a real VS Code extension host (@vscode/test-cli)
 npm run package   # vsce package to produce a .vsix
 ```
 
@@ -112,13 +112,24 @@ Open this project in VS Code and press `F5` to launch an Extension Development H
 
 ## CI / Release Pipeline
 
-The repository has three workflows configured (`.github/workflows/`):
+The repository has four workflows configured (`.github/workflows/`):
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | Every push/PR to `main` | `npm ci` → build → unit tests → `vsce package` smoke check |
+| `ci.yml` | Every push/PR to `main` | `npm ci` → build → unit tests → integration tests (real VS Code extension host) → `vsce package` → uploads the `.vsix` as a workflow artifact, publishes it as a `pr-<N>` prerelease, and comments a one-line install command on the PR |
+| `pr-cleanup.yml` | A PR is closed | Deletes that PR's `pr-<N>` prerelease and tag so test builds don't pile up in the Releases list |
 | `release-please.yml` | Push to `main` | Maintains a "Release PR" automatically based on [Conventional Commits](https://www.conventionalcommits.org/) messages (bumps the `package.json` version + `CHANGELOG.md`); merging it automatically tags a version and creates a GitHub Release |
-| `publish.yml` | A GitHub Release is published (`release: published`) | Build → test → package the `.vsix` → attach it to the Release → publish to the VS Code Marketplace (`vsce publish`) and Open VSX (`ovsx publish`) |
+| `publish.yml` | A GitHub Release is published (`release: published`), skipped for prereleases | Build → test → package the `.vsix` → attach it to the Release → publish to the VS Code Marketplace (`vsce publish`) and Open VSX (`ovsx publish`) |
+
+### Grabbing a PR's test build
+
+Every PR gets a comment with a ready-to-run install command, e.g.:
+
+```bash
+curl -fL -o remote-pulse-pr-8.vsix "https://github.com/tzzs/remote-pulse/releases/download/pr-8/remote-pulse-pr-8.vsix" && code --install-extension remote-pulse-pr-8.vsix
+```
+
+That build is a GitHub Release marked as a prerelease (not the "Latest" one — that stays whatever release-please last cut), gets overwritten on every push to the PR, and is deleted automatically once the PR closes.
 
 In short, the full pipeline is: **everyday commits follow Conventional Commits (`feat: xxx` / `fix: xxx` / `chore: xxx`, …) → release-please opens a version PR → merging it cuts a GitHub Release automatically → that automatically pushes to both marketplaces**.
 
