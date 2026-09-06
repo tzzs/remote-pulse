@@ -99,54 +99,61 @@ export class PulseStatusBar {
     };
   }
 
+  /**
+   * 用 markdown 表格而不是一堆手动拼空格的文本行:每个指标独占一格,GPU/Docker 这类
+   * 多子项的信息拆成子行(↳ 前缀),彻底避免"挤在同一段落里"和"对不齐"的问题。
+   */
   private buildTooltip(
     hostLabel: string,
     snapshot: Snapshot,
     config: RemotePulseConfig,
     sparklines: { cpu: number[]; memory: number[] },
   ): string {
-    const lines: string[] = [];
-    lines.push(`**${vscode.l10n.t('Remote host: {0}', hostLabel)}**`, '');
+    const rows: [string, string][] = [];
 
     if (snapshot.cpu) {
       const cpuSpark = renderSparkline(sparklines.cpu.length > 0 ? sparklines.cpu : [snapshot.cpu.percent]);
-      lines.push(`CPU  ${cpuSpark}  ${Math.round(snapshot.cpu.percent)}%  (${vscode.l10n.t('{0} cores', snapshot.cpu.cores)})`);
+      rows.push(['CPU', `${cpuSpark} ${Math.round(snapshot.cpu.percent)}% (${vscode.l10n.t('{0} cores', snapshot.cpu.cores)})`]);
     }
     if (snapshot.memory) {
       const memSpark = renderSparkline(sparklines.memory.length > 0 ? sparklines.memory : [snapshot.memory.percent]);
-      lines.push(
-        `${vscode.l10n.t('Memory')}  ${memSpark}  ${Math.round(snapshot.memory.percent)}%  (${formatBytes(snapshot.memory.used)} / ${formatBytes(snapshot.memory.total)})`,
-      );
+      rows.push([
+        vscode.l10n.t('Memory'),
+        `${memSpark} ${Math.round(snapshot.memory.percent)}% (${formatBytes(snapshot.memory.used)} / ${formatBytes(snapshot.memory.total)})`,
+      ]);
     }
-    if (snapshot.disks && snapshot.disks.length > 0) {
-      lines.push('', `**${vscode.l10n.t('Disks:')}**`);
-      for (const disk of snapshot.disks) {
-        lines.push(`- ${disk.mountPoint}  ${Math.round(disk.percent)}%  (${formatBytes(disk.used)} / ${formatBytes(disk.total)})`);
-      }
+    for (const disk of snapshot.disks ?? []) {
+      rows.push([vscode.l10n.t('Disk {0}', disk.mountPoint), `${Math.round(disk.percent)}% (${formatBytes(disk.used)} / ${formatBytes(disk.total)})`]);
     }
     if (config.enableNetwork && snapshot.network) {
-      lines.push('', `${vscode.l10n.t('Network')}  ↓ ${formatRate(snapshot.network.rxRate)}  ↑ ${formatRate(snapshot.network.txRate)}`);
+      rows.push([vscode.l10n.t('Network'), `↓ ${formatRate(snapshot.network.rxRate)}  ↑ ${formatRate(snapshot.network.txRate)}`]);
     }
-    if (config.enableGpu && snapshot.gpus && snapshot.gpus.length > 0) {
-      lines.push('', '**GPU:**');
-      for (const gpu of snapshot.gpus) {
-        lines.push(
-          `- #${gpu.index} ${gpu.name ?? ''}  ${gpu.utilizationPercent}%  ${vscode.l10n.t('VRAM {0}/{1} MB', gpu.memoryUsedMb, gpu.memoryTotalMb)}  ${gpu.temperatureC}°C`,
-        );
+    if (config.enableGpu) {
+      for (const gpu of snapshot.gpus ?? []) {
+        rows.push([`GPU #${gpu.index}${gpu.name ? ` (${gpu.name})` : ''}`, vscode.l10n.t('{0}% utilization', gpu.utilizationPercent)]);
+        rows.push([`↳ ${vscode.l10n.t('VRAM')}`, `${gpu.memoryUsedMb}/${gpu.memoryTotalMb} MB`]);
+        rows.push([`↳ ${vscode.l10n.t('Temp')}`, `${gpu.temperatureC}°C`]);
       }
     }
     if (config.enableDocker && snapshot.docker) {
-      lines.push('', `**Docker** — ${vscode.l10n.t('Running containers: {0}', snapshot.docker.containerCount)}`);
+      rows.push(['Docker', vscode.l10n.t('Running containers: {0}', snapshot.docker.containerCount)]);
       for (const c of snapshot.docker.containers.slice(0, 5)) {
-        lines.push(`- ${c.name}  CPU ${c.cpuPercent.toFixed(1)}%  ${vscode.l10n.t('Memory')} ${formatBytes(c.memoryUsedBytes)}`);
+        rows.push([`↳ ${c.name}`, `CPU ${c.cpuPercent.toFixed(1)}%  ${vscode.l10n.t('Memory')} ${formatBytes(c.memoryUsedBytes)}`]);
       }
     }
     if (snapshot.uptimeSeconds !== undefined) {
-      lines.push('', `Uptime  ${formatUptime(snapshot.uptimeSeconds)}`);
+      rows.push([vscode.l10n.t('Uptime'), formatUptime(snapshot.uptimeSeconds)]);
+    }
+
+    const lines: string[] = [];
+    lines.push(`**${vscode.l10n.t('Remote host: {0}', hostLabel)}**`, '');
+    lines.push(`| ${vscode.l10n.t('Metric')} | ${vscode.l10n.t('Value')} |`, '|---|---|');
+    for (const [label, value] of rows) {
+      lines.push(`| ${label} | ${value} |`);
     }
     lines.push('', '---', vscode.l10n.t('Click to view trend chart'));
 
-    return lines.join('  \n');
+    return lines.join('\n');
   }
 
   dispose(): void {
