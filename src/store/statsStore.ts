@@ -52,14 +52,11 @@ export function maxAlertLevel(...levels: AlertLevel[]): AlertLevel {
 }
 
 /**
- * VS Code 状态栏没有官方的"正常态"前景色,只能自己挑一个语义色;
- * 返回主题色 id(不直接依赖 vscode 模块),由调用方套进 new vscode.ThemeColor(id)。
+ * VS Code 状态栏背景色官方只承认 error/warning 两种语义色,normal 态没有对应背景。
+ * 正常态特意不设自定义前景色——状态栏背景会被 Vim 模式、Remote 连接等其他扩展/场景动态改变,
+ * 而 vscode API 不提供读取"当前实际背景色"的方式,自己挑一个固定颜色必然会在某些背景下失去对比度;
+ * 不设置就直接沿用主题的 statusBar.foreground,那才是跟着背景联动、始终保证可读的颜色。
  */
-export function foregroundColorIdFor(level: AlertLevel): string | undefined {
-  return level === 'normal' ? 'charts.green' : undefined;
-}
-
-/** VS Code 状态栏背景色官方只承认 error/warning 两种语义色,normal 态没有对应背景。 */
 export function backgroundColorIdFor(level: AlertLevel): string | undefined {
   if (level === 'critical') {
     return 'statusBarItem.errorBackground';

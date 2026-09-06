@@ -18,7 +18,12 @@ const TREND_WINDOW_MS = 30 * 60 * 1000;
 /** tooltip 里的 sparkline 只需要"最近走势"的观感,取全部窗口样本会让字符串随开机时长无限变长。 */
 const SPARKLINE_POINTS = 20;
 
-export function activate(context: vscode.ExtensionContext): void {
+/** 本地(非远程)窗口里没有"远程主机"可言,不应该出现状态栏/占用轮询资源。 */
+export function activate(context: vscode.ExtensionContext): { monitoring: boolean } {
+  if (!vscode.env.remoteName) {
+    return { monitoring: false };
+  }
+
   const statusBar = new PulseStatusBar();
   const store = new StatsStore();
 
@@ -149,6 +154,8 @@ export function activate(context: vscode.ExtensionContext): void {
     lightPoller,
     heavyPoller,
   );
+
+  return { monitoring: true };
 }
 
 export function deactivate(): void {

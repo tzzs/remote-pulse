@@ -4,7 +4,7 @@
   "Remote host: {0}": "远程主机: {0}",
   "{0} cores": "{0} 核",
   "Memory": "内存",
-  "Disk {0}": "磁盘 {0}",
+  "Disk": "磁盘",
   "Network": "网络",
   "{0}% utilization": "使用率 {0}%",
   "VRAM": "显存",

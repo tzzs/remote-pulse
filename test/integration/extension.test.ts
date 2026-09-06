@@ -11,18 +11,21 @@ suite('Extension activation (integration)', () => {
     assert.equal(ext!.isActive, true);
   });
 
-  test('registers both commands', async () => {
+  // 这个测试宿主本身就是一个本地(非远程)窗口,vscode.env.remoteName 恒为 undefined,
+  // 所以这里验证的正是"非远程时不应该启动监控"这条要求本身——不是巧合失败,是故意断言这个行为。
+  test('does not start monitoring outside a remote window', async () => {
+    assert.equal(vscode.env.remoteName, undefined, 'the integration test host is expected to be a local, non-remote window');
+    const ext = vscode.extensions.getExtension(EXTENSION_ID)!;
+    const api = await ext.activate();
+    assert.deepEqual(api, { monitoring: false });
+  });
+
+  test('does not register commands outside a remote window', async () => {
     const ext = vscode.extensions.getExtension(EXTENSION_ID)!;
     await ext.activate();
     const commands = await vscode.commands.getCommands(true);
-    assert.ok(commands.includes('remotePulse.showTrend'));
-    assert.ok(commands.includes('remotePulse.refresh'));
-  });
-
-  test('refresh command runs without throwing', async () => {
-    const ext = vscode.extensions.getExtension(EXTENSION_ID)!;
-    await ext.activate();
-    await vscode.commands.executeCommand('remotePulse.refresh');
+    assert.equal(commands.includes('remotePulse.showTrend'), false);
+    assert.equal(commands.includes('remotePulse.refresh'), false);
   });
 
   test('declares the expected configuration defaults', () => {

@@ -60,10 +60,13 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(bar.debugState.text, '$(pulse) CPU 12%  MEM 34%');
   });
 
-  test('normal level renders green text and no background', () => {
+  test('normal level leaves color/background untouched, inheriting the theme default', () => {
+    // 状态栏背景会被 Vim 模式插件、Remote 连接等场景动态改写,而 vscode API 没有办法读取
+    // "当前实际背景色",所以正常态特意不设自定义前景色——不设置才能始终跟随主题的
+    // statusBar.foreground,不会在某些背景下变得不可读。
     bar = new PulseStatusBar();
     bar.update('host', snapshotWith(), baseConfig(), 'ok');
-    assert.equal((bar.debugState.color as vscode.ThemeColor)?.id, 'charts.green');
+    assert.equal(bar.debugState.color, undefined);
     assert.equal(bar.debugState.backgroundColor, undefined);
   });
 
@@ -96,16 +99,36 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(before, after, 'item.tooltip should be the same object reference, only its .value should change');
   });
 
-  test('tooltip renders the host, CPU and memory as list items', () => {
+  test('tooltip renders the host, CPU and memory inside an aligned code block', () => {
     bar = new PulseStatusBar();
     bar.update('host-1', snapshotWith(), baseConfig(), 'ok');
     const tooltip = (bar.debugState.tooltip as vscode.MarkdownString).value;
     assert.match(tooltip, /Remote host: host-1/);
-    assert.match(tooltip, /^- CPU\s.*10%.*\(4 cores\)/m);
-    assert.match(tooltip, /^- Memory\s.*10%/m);
+    assert.match(tooltip, /```\n[\s\S]*```/, 'the metric rows should be wrapped in a fenced code block for monospace alignment');
+    assert.match(tooltip, /^CPU\s+.*10%.*\(4 cores\)/m);
+    assert.match(tooltip, /^Memory\s+.*10%/m);
   });
 
-  test('each disk gets its own list item instead of running together on one line', () => {
+  test('every row value starts at the same column, regardless of label length', () => {
+    bar = new PulseStatusBar();
+    bar.update(
+      'host',
+      snapshotWith({ gpus: [{ index: 0, name: 'RTX 5060 Ti', utilizationPercent: 6, memoryUsedMb: 2293, memoryTotalMb: 16311, temperatureC: 47 }] }),
+      baseConfig(),
+      'ok',
+    );
+    const tooltip = (bar.debugState.tooltip as vscode.MarkdownString).value;
+    const body = tooltip.split('```')[1].trim().split('\n');
+    const valueColumns = body.map(line => {
+      // 非贪婪匹配到"标签部分"(可能内部带单个空格,比如 "GPU #0"),直到遇到 2+ 个空格的真正填充段。
+      const match = line.match(/^(.+?\S)( {2,})(?=\S)/);
+      assert.ok(match, `row should have a label followed by at least two spaces before its value: "${line}"`);
+      return match![1].length + match![2].length;
+    });
+    assert.ok(valueColumns.every(col => col === valueColumns[0]), `expected every row's value to start at the same column, got: ${JSON.stringify(valueColumns)}`);
+  });
+
+  test('each disk gets its own row instead of running together on one line', () => {
     bar = new PulseStatusBar();
     bar.update(
       'host',
@@ -121,21 +144,21 @@ suite('PulseStatusBar (integration)', () => {
     const lines = (bar.debugState.tooltip as vscode.MarkdownString).value.split('\n');
     const cLine = lines.find(l => l.includes('/mnt/c'));
     const jLine = lines.find(l => l.includes('/mnt/j'));
-    assert.ok(cLine?.startsWith('- ') && /87%/.test(cLine));
-    assert.ok(jLine?.startsWith('- ') && /86%/.test(jLine));
-    assert.notEqual(cLine, jLine, 'each disk should be a separate list item, not sharing a line');
+    assert.ok(cLine && /87%/.test(cLine));
+    assert.ok(jLine && /86%/.test(jLine));
+    assert.notEqual(cLine, jLine, 'each disk should be a separate row, not sharing a line');
   });
 
-  test('GPU utilization, VRAM and temperature each get their own indented sub-item', () => {
+  test('GPU utilization, VRAM and temperature each get their own row, VRAM/Temp indented under it', () => {
     bar = new PulseStatusBar();
     bar.update('host', snapshotWith({ gpus: [{ index: 0, name: 'RTX 5060 Ti', utilizationPercent: 6, memoryUsedMb: 2293, memoryTotalMb: 16311, temperatureC: 47 }] }), baseConfig(), 'ok');
     const lines = (bar.debugState.tooltip as vscode.MarkdownString).value.split('\n');
     const utilLine = lines.find(l => l.includes('GPU #0'));
     const vramLine = lines.find(l => l.includes('VRAM'));
     const tempLine = lines.find(l => l.includes('Temp'));
-    assert.ok(utilLine?.startsWith('- ') && /6%/.test(utilLine));
-    assert.ok(vramLine?.startsWith('  - ') && /2293\/16311 MB/.test(vramLine), 'VRAM should be an indented sub-item of the GPU line');
-    assert.ok(tempLine?.startsWith('  - ') && /47°C/.test(tempLine), 'Temp should be an indented sub-item of the GPU line');
+    assert.ok(utilLine && /RTX 5060 Ti/.test(utilLine) && /6%/.test(utilLine));
+    assert.ok(vramLine?.startsWith('  ') && /2293\/16311 MB/.test(vramLine), 'VRAM should be an indented sub-row under the GPU line');
+    assert.ok(tempLine?.startsWith('  ') && /47°C/.test(tempLine), 'Temp should be an indented sub-row under the GPU line');
   });
 
   test('the tooltip sparkline is capped to the samples it is given, not unbounded', () => {
@@ -143,7 +166,7 @@ suite('PulseStatusBar (integration)', () => {
     const cpuHistory = Array.from({ length: 20 }, (_, i) => i * 5);
     bar.update('host', snapshotWith(), baseConfig(), 'ok', { cpu: cpuHistory, memory: [] });
     const tooltip = (bar.debugState.tooltip as vscode.MarkdownString).value;
-    const cpuLine = tooltip.split('\n').find(line => line.startsWith('- CPU'));
+    const cpuLine = tooltip.split('\n').find(line => line.startsWith('CPU'));
     assert.ok(cpuLine);
     const sparkChars = cpuLine!.match(/[▁▂▃▄▅▆▇█]/g) ?? [];
     assert.equal(sparkChars.length, cpuHistory.length);

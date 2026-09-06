@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import { AlertLevel, CollectionState, Snapshot } from './types';
 import { RemotePulseConfig } from './config';
-import { calcAlertLevel, maxAlertLevel, foregroundColorIdFor, backgroundColorIdFor } from './store/statsStore';
+import { calcAlertLevel, maxAlertLevel, backgroundColorIdFor } from './store/statsStore';
 import { renderSparkline, formatBytes, formatRate, formatUptime } from './util/sparkline';
 import { renderStatusBarText } from './util/statusBarText';
+import { visualWidth, padLabel } from './util/align';
 
 export class PulseStatusBar {
   private readonly item: vscode.StatusBarItem;
@@ -22,7 +23,6 @@ export class PulseStatusBar {
 
   showLoading(): void {
     this.item.text = '$(sync~spin)';
-    this.item.color = undefined;
     this.item.backgroundColor = undefined;
     this.tooltipMarkdown.value = vscode.l10n.t('Collecting remote host status…');
   }
@@ -30,7 +30,6 @@ export class PulseStatusBar {
   /** 采集失败(权限/网络抖动)时静默降级,不弹烦人的错误通知,只在 tooltip 里说明原因。 */
   showError(reason: string): void {
     this.item.text = '$(circle-slash)';
-    this.item.color = undefined;
     this.item.backgroundColor = undefined;
     this.tooltipMarkdown.value = vscode.l10n.t('Collection failed: {0}', reason);
   }
@@ -62,14 +61,8 @@ export class PulseStatusBar {
     const memText = memPercent !== undefined ? String(Math.round(memPercent)).padStart(2, ' ') : '--';
 
     this.item.text = renderStatusBarText(config.template, cpuText, memText, level === 'critical');
-    this.item.color = this.colorFor(level);
     this.item.backgroundColor = this.backgroundColorFor(level);
     this.tooltipMarkdown.value = this.buildTooltip(hostLabel, snapshot, config, sparklines);
-  }
-
-  private colorFor(level: AlertLevel): vscode.ThemeColor | undefined {
-    const id = foregroundColorIdFor(level);
-    return id ? new vscode.ThemeColor(id) : undefined;
   }
 
   private backgroundColorFor(level: AlertLevel): vscode.ThemeColor | undefined {
@@ -99,9 +92,10 @@ export class PulseStatusBar {
   }
 
   /**
-   * 用嵌套的 markdown 列表:表格在部分主题下会把单元格文字渲染得偏浅、长文本还会在列内断行错位,
-   * 列表没有这些问题——连续的 "- " 行本来就会被解析成独立列表项,不需要额外的硬换行技巧;
-   * GPU/Docker 这类多子项信息用两格缩进的子列表(↳ 效果由缩进本身体现,不用箭头符号)分开。
+   * 每个指标一行 "标签 + 数值",放进一个 markdown 代码块里手动补空格对齐——
+   * 代码块是等宽字体,普通段落/列表是不定宽字体,单纯拼空格在普通文本里对不齐。
+   * 标签只用固定的短词(CPU/内存/GPU #N/VRAM/温度...),挂载点、GPU 型号、容器名这些
+   * 长度不定的内容一律放进数值那一列,避免某一行标签特别长时把所有行的对齐都拖垮。
    */
   private buildTooltip(
     hostLabel: string,
@@ -109,43 +103,47 @@ export class PulseStatusBar {
     config: RemotePulseConfig,
     sparklines: { cpu: number[]; memory: number[] },
   ): string {
-    const lines: string[] = [];
-    lines.push(`**${vscode.l10n.t('Remote host: {0}', hostLabel)}**`, '');
+    const rows: [string, string][] = [];
 
     if (snapshot.cpu) {
       const cpuSpark = renderSparkline(sparklines.cpu.length > 0 ? sparklines.cpu : [snapshot.cpu.percent]);
-      lines.push(`- CPU  ${cpuSpark} ${Math.round(snapshot.cpu.percent)}% (${vscode.l10n.t('{0} cores', snapshot.cpu.cores)})`);
+      rows.push(['CPU', `${cpuSpark} ${Math.round(snapshot.cpu.percent)}% (${vscode.l10n.t('{0} cores', snapshot.cpu.cores)})`]);
     }
     if (snapshot.memory) {
       const memSpark = renderSparkline(sparklines.memory.length > 0 ? sparklines.memory : [snapshot.memory.percent]);
-      lines.push(
-        `- ${vscode.l10n.t('Memory')}  ${memSpark} ${Math.round(snapshot.memory.percent)}% (${formatBytes(snapshot.memory.used)} / ${formatBytes(snapshot.memory.total)})`,
-      );
+      rows.push([
+        vscode.l10n.t('Memory'),
+        `${memSpark} ${Math.round(snapshot.memory.percent)}% (${formatBytes(snapshot.memory.used)} / ${formatBytes(snapshot.memory.total)})`,
+      ]);
     }
     for (const disk of snapshot.disks ?? []) {
-      lines.push(`- ${vscode.l10n.t('Disk {0}', disk.mountPoint)}  ${Math.round(disk.percent)}% (${formatBytes(disk.used)} / ${formatBytes(disk.total)})`);
+      rows.push([vscode.l10n.t('Disk'), `${disk.mountPoint}  ${Math.round(disk.percent)}% (${formatBytes(disk.used)} / ${formatBytes(disk.total)})`]);
     }
     if (config.enableNetwork && snapshot.network) {
-      lines.push(`- ${vscode.l10n.t('Network')}  ↓ ${formatRate(snapshot.network.rxRate)}  ↑ ${formatRate(snapshot.network.txRate)}`);
+      rows.push([vscode.l10n.t('Network'), `↓ ${formatRate(snapshot.network.rxRate)}  ↑ ${formatRate(snapshot.network.txRate)}`]);
     }
     if (config.enableGpu) {
       for (const gpu of snapshot.gpus ?? []) {
-        lines.push(`- GPU #${gpu.index}${gpu.name ? ` (${gpu.name})` : ''}  ${vscode.l10n.t('{0}% utilization', gpu.utilizationPercent)}`);
-        lines.push(`  - ${vscode.l10n.t('VRAM')}  ${gpu.memoryUsedMb}/${gpu.memoryTotalMb} MB`);
-        lines.push(`  - ${vscode.l10n.t('Temp')}  ${gpu.temperatureC}°C`);
+        const utilization = vscode.l10n.t('{0}% utilization', gpu.utilizationPercent);
+        rows.push([`GPU #${gpu.index}`, gpu.name ? `${gpu.name} · ${utilization}` : utilization]);
+        rows.push([`  ${vscode.l10n.t('VRAM')}`, `${gpu.memoryUsedMb}/${gpu.memoryTotalMb} MB`]);
+        rows.push([`  ${vscode.l10n.t('Temp')}`, `${gpu.temperatureC}°C`]);
       }
     }
     if (config.enableDocker && snapshot.docker) {
-      lines.push(`- Docker  ${vscode.l10n.t('Running containers: {0}', snapshot.docker.containerCount)}`);
+      rows.push(['Docker', vscode.l10n.t('Running containers: {0}', snapshot.docker.containerCount)]);
       for (const c of snapshot.docker.containers.slice(0, 5)) {
-        lines.push(`  - ${c.name}  CPU ${c.cpuPercent.toFixed(1)}%  ${vscode.l10n.t('Memory')} ${formatBytes(c.memoryUsedBytes)}`);
+        rows.push([`  ${c.name}`, `CPU ${c.cpuPercent.toFixed(1)}%  ${vscode.l10n.t('Memory')} ${formatBytes(c.memoryUsedBytes)}`]);
       }
     }
     if (snapshot.uptimeSeconds !== undefined) {
-      lines.push(`- ${vscode.l10n.t('Uptime')}  ${formatUptime(snapshot.uptimeSeconds)}`);
+      rows.push([vscode.l10n.t('Uptime'), formatUptime(snapshot.uptimeSeconds)]);
     }
 
-    return lines.join('\n');
+    const labelWidth = Math.max(0, ...rows.map(([label]) => visualWidth(label))) + 2;
+    const body = rows.map(([label, value]) => `${padLabel(label, labelWidth)}${value}`).join('\n');
+
+    return [`**${vscode.l10n.t('Remote host: {0}', hostLabel)}**`, '', '```', body, '```'].join('\n');
   }
 
   dispose(): void {
