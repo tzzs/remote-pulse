@@ -112,13 +112,24 @@ npm run package   # vsce package 生成 .vsix
 
 ## CI / 发布流水线
 
-仓库里配了三个 workflow(`.github/workflows/`):
+仓库里配了四个 workflow(`.github/workflows/`):
 
 | Workflow | 触发条件 | 作用 |
 |---|---|---|
-| `ci.yml` | 每次 push / PR 到 `main` | `npm ci` → 编译 → 单元测试 → 集成测试(真实 VS Code 扩展宿主)→ `vsce package` → 把 `.vsix` 传成 workflow artifact,并在 PR 里评论下载链接 |
+| `ci.yml` | 每次 push / PR 到 `main` | `npm ci` → 编译 → 单元测试 → 集成测试(真实 VS Code 扩展宿主)→ `vsce package` → 把 `.vsix` 传成 workflow artifact、同时发布成一个 `pr-<N>` 的 prerelease,并在 PR 里评论一条一键安装命令 |
+| `pr-cleanup.yml` | PR 被关闭 | 删掉该 PR 对应的 `pr-<N>` prerelease 和 tag,避免 Releases 列表堆满测试版本 |
 | `release-please.yml` | push 到 `main` | 根据 [Conventional Commits](https://www.conventionalcommits.org/) 提交信息,自动维护一个"Release PR"(更新 `package.json` 版本号 + `CHANGELOG.md`);合并该 PR 后自动打 tag、建 GitHub Release |
-| `publish.yml` | GitHub Release 发布(`release: published`) | 编译 → 测试 → 打包 `.vsix` → 附加到 Release → 发布到 VS Code Marketplace(`vsce publish`)与 Open VSX(`ovsx publish`) |
+| `publish.yml` | GitHub Release 发布(`release: published`),prerelease 会被跳过 | 编译 → 测试 → 打包 `.vsix` → 附加到 Release → 发布到 VS Code Marketplace(`vsce publish`)与 Open VSX(`ovsx publish`) |
+
+### 拿到某个 PR 的测试版本
+
+每个 PR 下面都会有一条评论,带一条能直接执行的安装命令,比如:
+
+```bash
+curl -fL -o remote-pulse-pr-8.vsix "https://github.com/tzzs/remote-pulse/releases/download/pr-8/remote-pulse-pr-8.vsix" && code --install-extension remote-pulse-pr-8.vsix
+```
+
+这个测试版本是一个标成 prerelease 的 GitHub Release(不会顶替"Latest"那个正式版,正式版还是 release-please 打的),每次给这个 PR 推送新提交都会覆盖它,PR 关闭后会自动删除。
 
 也就是说完整链路是:**日常提交遵循 Conventional Commits(`feat: xxx` / `fix: xxx` / `chore: xxx` …)→ release-please 开出版本 PR → 合并后自动发 GitHub Release → 自动推送到两个插件市场**。
 

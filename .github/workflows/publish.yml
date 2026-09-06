@@ -9,6 +9,8 @@ permissions:
 
 jobs:
   publish:
+    # Prereleases are PR test builds (see ci.yml) — never push those to the real marketplaces.
+    if: github.event.release.prerelease == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

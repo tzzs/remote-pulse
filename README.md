@@ -112,13 +112,24 @@ Open this project in VS Code and press `F5` to launch an Extension Development H
 
 ## CI / Release Pipeline
 
-The repository has three workflows configured (`.github/workflows/`):
+The repository has four workflows configured (`.github/workflows/`):
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | Every push/PR to `main` | `npm ci` → build → unit tests → integration tests (real VS Code extension host) → `vsce package` → uploads the `.vsix` as a workflow artifact and comments the download link on the PR |
+| `ci.yml` | Every push/PR to `main` | `npm ci` → build → unit tests → integration tests (real VS Code extension host) → `vsce package` → uploads the `.vsix` as a workflow artifact, publishes it as a `pr-<N>` prerelease, and comments a one-line install command on the PR |
+| `pr-cleanup.yml` | A PR is closed | Deletes that PR's `pr-<N>` prerelease and tag so test builds don't pile up in the Releases list |
 | `release-please.yml` | Push to `main` | Maintains a "Release PR" automatically based on [Conventional Commits](https://www.conventionalcommits.org/) messages (bumps the `package.json` version + `CHANGELOG.md`); merging it automatically tags a version and creates a GitHub Release |
-| `publish.yml` | A GitHub Release is published (`release: published`) | Build → test → package the `.vsix` → attach it to the Release → publish to the VS Code Marketplace (`vsce publish`) and Open VSX (`ovsx publish`) |
+| `publish.yml` | A GitHub Release is published (`release: published`), skipped for prereleases | Build → test → package the `.vsix` → attach it to the Release → publish to the VS Code Marketplace (`vsce publish`) and Open VSX (`ovsx publish`) |
+
+### Grabbing a PR's test build
+
+Every PR gets a comment with a ready-to-run install command, e.g.:
+
+```bash
+curl -fL -o remote-pulse-pr-8.vsix "https://github.com/tzzs/remote-pulse/releases/download/pr-8/remote-pulse-pr-8.vsix" && code --install-extension remote-pulse-pr-8.vsix
+```
+
+That build is a GitHub Release marked as a prerelease (not the "Latest" one — that stays whatever release-please last cut), gets overwritten on every push to the PR, and is deleted automatically once the PR closes.
 
 In short, the full pipeline is: **everyday commits follow Conventional Commits (`feat: xxx` / `fix: xxx` / `chore: xxx`, …) → release-please opens a version PR → merging it cuts a GitHub Release automatically → that automatically pushes to both marketplaces**.
 
