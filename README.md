@@ -27,7 +27,7 @@ Default: $(pulse) 23%
 Alert:   $(warning) 92%   ← status bar background turns warning/critical color
 ```
 
-Run `Remote Pulse: Show Trend Chart` to open a line chart of the last 30 minutes of CPU/memory history, plus disk/network/GPU/Docker detail (a Webview that's destroyed on close — nothing stays resident in memory).
+Click the status bar item — or run `Remote Pulse: Show Trend Chart` — to open a line chart of the last 30 minutes of CPU/memory history, plus disk/network/GPU/Docker detail (a Webview that's destroyed on close — nothing stays resident in memory).
 
 ## Features
 

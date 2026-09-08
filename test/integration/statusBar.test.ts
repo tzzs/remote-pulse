@@ -102,8 +102,10 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(bar.debugState.text, '$(circle-slash)');
   });
 
-  test('clicking the status bar item does nothing for now (the trend panel entry point is disabled)', () => {
+  // 悬浮 tooltip 已移除,磁盘/网络/GPU/Docker 只在趋势面板里能看到,
+  // 点击就是这个面板在命令面板之外的唯一入口——所以这条绑定不能再被摘掉。
+  test('clicking the status bar item opens the trend panel', () => {
     bar = new PulseStatusBar();
-    assert.equal(bar.debugState.command, undefined);
+    assert.equal(bar.debugState.command, 'remotePulse.showTrend');
   });
 });

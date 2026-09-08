@@ -27,7 +27,7 @@
 告警态:  $(warning) 92%   ← 状态栏背景变为警告色/严重色
 ```
 
-运行「Remote Pulse: Show Trend Chart」命令弹出 30 分钟 CPU/内存趋势的折线图,以及磁盘/网络/GPU/Docker 详情(Webview,关闭即销毁,不常驻内存)。
+点击状态栏——或运行「Remote Pulse: Show Trend Chart」命令——弹出 30 分钟 CPU/内存趋势的折线图,以及磁盘/网络/GPU/Docker 详情(Webview,关闭即销毁,不常驻内存)。
 
 ## 功能
 

@@ -4,12 +4,16 @@ import { RemotePulseConfig } from './config';
 import { calcAlertLevel, maxAlertLevel, backgroundColorIdFor } from './store/statsStore';
 import { renderStatusBarText } from './util/statusBarText';
 
+/** 状态栏本身只显示 CPU/内存两个数字,其余指标全部在趋势面板里——点击是进入面板的唯一入口。 */
+const SHOW_TREND_COMMAND = 'remotePulse.showTrend';
+
 export class PulseStatusBar {
   private readonly item: vscode.StatusBarItem;
 
   constructor() {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
     this.item.name = 'Remote Pulse';
+    this.item.command = SHOW_TREND_COMMAND;
     this.showLoading();
     this.item.show();
   }
