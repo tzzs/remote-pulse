@@ -17,6 +17,13 @@ export interface TrendSeries {
   timestamps: number[];
   cpu: number[];
   memory: number[];
+  /**
+   * rx+tx 之和,已按窗口内峰值归一化到 0-100——网络速率没有 CPU/内存那种天然上限,
+   * 没法直接和它们共用 0-100% 的同一根 y 轴,只能相对自身峰值展示波动。
+   * 配合 networkPeakRate(单位 B/s)才能在图例/悬浮提示里还原出真实速率。
+   */
+  network?: number[];
+  networkPeakRate?: number;
 }
 
 export interface TrendLatest {
@@ -68,7 +75,7 @@ interface ChartLegendItem {
 
 type PanelGroup =
   | { kind: 'metrics'; title: string; badge?: string; rows: MetricRow[] }
-  | { kind: 'chart'; title: string; legend: [ChartLegendItem, ChartLegendItem]; emptyHint: string }
+  | { kind: 'chart'; title: string; legend: ChartLegendItem[]; emptyHint: string }
   | { kind: 'table'; title: string; badge?: string; columns: [string, string]; rows: [string, string, string][]; emptyHint?: string };
 
 interface PanelModel {
@@ -76,7 +83,7 @@ interface PanelModel {
   updated: string;
   settingsLabel: string;
   groups: PanelGroup[];
-  series: { timestamps: number[]; cpu: number[]; memory: number[] };
+  series: { timestamps: number[]; cpu: number[]; memory: number[]; network?: number[]; networkPeakRate?: number };
 }
 
 /**
@@ -217,13 +224,22 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
     groups.push({ kind: 'metrics', title: vscode.l10n.t('System'), rows: system });
   }
 
+  const legend: ChartLegendItem[] = [
+    { name: 'CPU', value: latest?.cpu ? `${Math.round(latest.cpu.percent)}%` : undefined },
+    { name: vscode.l10n.t('Memory'), value: latest?.memory ? `${Math.round(latest.memory.percent)}%` : undefined },
+  ];
+  // 图例顺序就是图表画线的顺序(cpu, memory, 再 network)——PANEL_SCRIPT 按这个顺序把
+  // legend.length 映射回 series 里的哪几条线,两边靠"顺序"这一份隐含约定对齐。
+  if (series.network) {
+    legend.push({
+      name: vscode.l10n.t('Network'),
+      value: latest?.network ? formatRate(latest.network.rxRate + latest.network.txRate) : undefined,
+    });
+  }
   groups.push({
     kind: 'chart',
     title: vscode.l10n.t('past 30 minutes'),
-    legend: [
-      { name: 'CPU', value: latest?.cpu ? `${Math.round(latest.cpu.percent)}%` : undefined },
-      { name: vscode.l10n.t('Memory'), value: latest?.memory ? `${Math.round(latest.memory.percent)}%` : undefined },
-    ],
+    legend,
     emptyHint: vscode.l10n.t('Not enough history data yet. Please wait a few seconds and reopen.'),
   });
 
@@ -293,7 +309,13 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
     updated: vscode.l10n.t('Updated {0}', updatedAt),
     settingsLabel: vscode.l10n.t('Open Remote Pulse Settings'),
     groups,
-    series: { timestamps: series.timestamps, cpu: series.cpu, memory: series.memory },
+    series: {
+      timestamps: series.timestamps,
+      cpu: series.cpu,
+      memory: series.memory,
+      network: series.network,
+      networkPeakRate: series.networkPeakRate,
+    },
   };
 }
 
@@ -311,6 +333,7 @@ const PANEL_CSS = `
     --rp-critical: var(--vscode-editorError-foreground, #f14c4c);
     --rp-cpu: var(--vscode-charts-blue, #3794ff);
     --rp-mem: var(--vscode-charts-purple, #b180d7);
+    --rp-net: var(--vscode-charts-green, #89d185);
   }
   body {
     margin: 0;
@@ -391,6 +414,7 @@ const PANEL_CSS = `
   .chart .axis { fill: var(--rp-muted); font-size: 11px; }
   .chart .cpu { fill: none; stroke: var(--rp-cpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .mem { fill: none; stroke: var(--rp-mem); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .net { fill: none; stroke: var(--rp-net); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .guide { stroke: var(--rp-muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; pointer-events: none; }
   .chart .hover-dot { opacity: 0; pointer-events: none; }
   .hint { font-size: 11px; line-height: 16px; color: var(--rp-muted); margin: 6px 0 0; }
@@ -441,12 +465,17 @@ const PANEL_SCRIPT = `
   let chartEl = null;
   let chartHint = null;
   let chartTooltip = null;
-  let chartLegendNames = ['CPU', 'Memory'];
+  /** 图表最多 3 条线:cpu、memory,再加可选的 network——顺序和 buildModel() 拼 legend 的顺序对齐。 */
+  var SERIES_DEFS = [
+    { key: 'cpu', colorVar: 'var(--rp-cpu)', className: 'cpu' },
+    { key: 'memory', colorVar: 'var(--rp-mem)', className: 'mem' },
+    { key: 'network', colorVar: 'var(--rp-net)', className: 'net' },
+  ];
+  let chartActiveDefs = SERIES_DEFS.slice(0, 2);
   /** 悬浮态跨轮询保留:每 2 秒的重绘会重建折线和圆点,如果不在重绘后把悬浮指示器按住原位置
       重新画一次,鼠标不动也会看到它每 2 秒闪一下。 */
   let chartGuide = null;
-  let chartDotCpu = null;
-  let chartDotMem = null;
+  let chartDots = [];
   let hovering = false;
   let lastPointerClientX = 0;
   let lastPointerClientY = 0;
@@ -475,6 +504,16 @@ const PANEL_SCRIPT = `
     return node;
   }
 
+  /** 悬浮提示要把归一化后的网络线还原回真实速率——和 src/util/sparkline.ts 的 formatRate 同一套算法。 */
+  function formatRateJs(bytesPerSec) {
+    if (!isFinite(bytesPerSec) || bytesPerSec < 0) return '0 B/s';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var value = bytesPerSec;
+    var i = 0;
+    while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+    return value.toFixed(i === 0 ? 0 : 1) + ' ' + units[i] + '/s';
+  }
+
   function gearIcon() {
     const node = svg('svg', { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true' });
     node.appendChild(svg('circle', { cx: 8, cy: 8, r: 2.8, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.2 }));
@@ -490,7 +529,9 @@ const PANEL_SCRIPT = `
     return JSON.stringify(m.groups.map(function (g) {
       if (g.kind === 'metrics') return ['m', g.title, g.rows.map(function (r) { return [r.label, !!r.sub, !!r.strong, r.percent !== undefined]; })];
       if (g.kind === 'table') return ['t', g.title, g.rows.map(function (r) { return r[0]; })];
-      return ['c', g.title];
+      // legend.length 变化(比如 network 被中途启用/停用)必须触发整块重建,否则 chartActiveDefs
+      // 和图例项数对不上,apply() 按旧的 slot 顺序去读新模型会直接读错位置。
+      return ['c', g.title, g.legend.length];
     })) + '|' + m.host.name + '|' + m.host.meta + '|' + (m.host.user || '');
   }
 
@@ -500,8 +541,7 @@ const PANEL_SCRIPT = `
     chartHint = null;
     chartTooltip = null;
     chartGuide = null;
-    chartDotCpu = null;
-    chartDotMem = null;
+    chartDots = [];
     chartData = null;
     hovering = false;
     const frag = document.createDocumentFragment();
@@ -546,12 +586,15 @@ const PANEL_SCRIPT = `
       head.appendChild(el('span', 'section-title', group.title));
 
       if (group.kind === 'chart') {
-        chartLegendNames = [group.legend[0].name, group.legend[1].name];
+        // 每次 build() 都拷贝一份新对象带上当前语言的 name,SERIES_DEFS 本身只提供 key/颜色这些不随语言变化的部分。
+        chartActiveDefs = SERIES_DEFS.slice(0, group.legend.length).map(function (def, i) {
+          return { key: def.key, name: group.legend[i].name, colorVar: def.colorVar, className: def.className };
+        });
         const legend = el('span', 'legend');
         for (let i = 0; i < group.legend.length; i++) {
           const item = el('span', 'legend-item');
           const dot = el('span', 'swatch');
-          dot.style.background = i === 0 ? 'var(--rp-cpu)' : 'var(--rp-mem)';
+          dot.style.background = chartActiveDefs[i].colorVar;
           item.appendChild(dot);
           item.appendChild(document.createTextNode(group.legend[i].name));
           // 末端圆点旁边这个数才是真正的"当前值"——每轮采集都更新,不需要悬浮就看得到。
@@ -691,27 +734,37 @@ const PANEL_SCRIPT = `
   function hideHover() {
     hovering = false;
     if (chartGuide) chartGuide.style.opacity = '0';
-    if (chartDotCpu) chartDotCpu.style.opacity = '0';
-    if (chartDotMem) chartDotMem.style.opacity = '0';
+    for (const dot of chartDots) dot.style.opacity = '0';
     if (chartTooltip) chartTooltip.style.display = 'none';
   }
 
-  function renderTooltipContent(cpuValue, memValue, timeMs) {
+  /** CPU/内存本来就是 0-100 的百分比,直接显示;network 那条线是归一化过的,要用峰值速率换算回真实数值。 */
+  function formatSeriesValue(def, value) {
+    if (def.key === 'network') {
+      const peak = (chartData && chartData.networkPeakRate) || 0;
+      return formatRateJs((Math.max(0, Math.min(100, value)) / 100) * peak);
+    }
+    return Math.round(Math.max(0, Math.min(100, value))) + '%';
+  }
+
+  function renderTooltipContent(valuesAtIndex, timeMs) {
     chartTooltip.replaceChildren();
     const d = new Date(timeMs);
     chartTooltip.appendChild(el('div', 'time', isNaN(d.getTime()) ? '' : d.toLocaleTimeString()));
 
-    function metricRow(colorVar, name, value) {
+    function metricRow(colorVar, name, text) {
       const row = el('div', 'metric');
       const dot = el('span', 'swatch');
       dot.style.background = colorVar;
       row.appendChild(dot);
       row.appendChild(el('span', '', name));
-      row.appendChild(el('span', 'value', Math.round(Math.max(0, Math.min(100, value))) + '%'));
+      row.appendChild(el('span', 'value', text));
       return row;
     }
-    chartTooltip.appendChild(metricRow('var(--rp-cpu)', chartLegendNames[0], cpuValue));
-    chartTooltip.appendChild(metricRow('var(--rp-mem)', chartLegendNames[1], memValue));
+    for (let i = 0; i < chartActiveDefs.length; i++) {
+      const def = chartActiveDefs[i];
+      chartTooltip.appendChild(metricRow(def.colorVar, def.name, formatSeriesValue(def, valuesAtIndex[i])));
+    }
   }
 
   /** clientX/clientY 是最近一次真实指针事件的坐标;重绘后用同一坐标重算,悬浮态才能跨轮询保留。 */
@@ -734,29 +787,30 @@ const PANEL_SCRIPT = `
     }
 
     const x = chartData.xs[nearest];
-    const cpuValue = chartData.cpuVals[nearest];
-    const memValue = chartData.memVals[nearest];
-    const cpuY = chartData.top + (1 - Math.max(0, Math.min(100, cpuValue)) / 100) * chartData.plotH;
-    const memY = chartData.top + (1 - Math.max(0, Math.min(100, memValue)) / 100) * chartData.plotH;
+    const valuesAtIndex = chartData.series.map(function (s) { return s.vals[nearest]; });
+    let minY = Infinity;
+    for (let i = 0; i < chartData.series.length; i++) {
+      const v = valuesAtIndex[i];
+      const y = chartData.top + (1 - Math.max(0, Math.min(100, v)) / 100) * chartData.plotH;
+      const dot = chartDots[i];
+      dot.setAttribute('cx', x);
+      dot.setAttribute('cy', y);
+      dot.style.opacity = '1';
+      if (y < minY) minY = y;
+    }
 
     chartGuide.setAttribute('x1', x);
     chartGuide.setAttribute('x2', x);
     chartGuide.style.opacity = '1';
-    chartDotCpu.setAttribute('cx', x);
-    chartDotCpu.setAttribute('cy', cpuY);
-    chartDotCpu.style.opacity = '1';
-    chartDotMem.setAttribute('cx', x);
-    chartDotMem.setAttribute('cy', memY);
-    chartDotMem.style.opacity = '1';
 
-    renderTooltipContent(cpuValue, memValue, chartData.times[nearest]);
+    renderTooltipContent(valuesAtIndex, chartData.times[nearest]);
 
     const wrap = chartEl.parentElement;
     const wrapRect = wrap.getBoundingClientRect();
     const offsetX = rect.left - wrapRect.left;
     const offsetY = rect.top - wrapRect.top;
     const pointLocalX = offsetX + x / scale;
-    const pointLocalY = offsetY + Math.min(cpuY, memY) / scale;
+    const pointLocalY = offsetY + minY / scale;
 
     chartTooltip.style.display = 'flex';
     const ttWidth = chartTooltip.offsetWidth;
@@ -780,6 +834,13 @@ const PANEL_SCRIPT = `
 
   function onChartPointerLeave() {
     hideHover();
+  }
+
+  function valuesFor(key, series) {
+    if (key === 'cpu') return series.cpu;
+    if (key === 'memory') return series.memory;
+    if (key === 'network') return series.network || [];
+    return [];
   }
 
   function drawChart(series) {
@@ -821,14 +882,13 @@ const PANEL_SCRIPT = `
     const rightPad = 5;
     const span = width - gutter - rightPad;
     const maxPoints = Math.max(2, Math.floor(span / 3));
-    const cpuVals = downsample(series.cpu, maxPoints);
-    const memVals = downsample(series.memory, maxPoints);
     const times = downsample(series.timestamps, maxPoints);
-    const count = cpuVals.length;
+    const downsampled = chartActiveDefs.map(function (def) { return downsample(valuesFor(def.key, series), maxPoints); });
+    const count = downsampled.length ? downsampled[0].length : 0;
     const xs = [];
     for (let i = 0; i < count; i++) xs.push(gutter + (span * i) / (count - 1));
 
-    function line(values, className) {
+    function line(values, className, colorVar) {
       if (values.length < 2) return;
       let points = '';
       for (let i = 0; i < values.length; i++) {
@@ -839,22 +899,31 @@ const PANEL_SCRIPT = `
       chartEl.appendChild(svg('polyline', { class: className, points: points }));
       const last = Math.max(0, Math.min(100, values[values.length - 1]));
       chartEl.appendChild(svg('circle', {
-        cx: xs[xs.length - 1], cy: top + (1 - last / 100) * plotH, r: endDotRadius,
-        fill: className === 'cpu' ? 'var(--rp-cpu)' : 'var(--rp-mem)',
+        cx: xs[xs.length - 1], cy: top + (1 - last / 100) * plotH, r: endDotRadius, fill: colorVar,
       }));
     }
-    line(memVals, 'mem');
-    line(cpuVals, 'cpu');
+    // 倒序画(network、memory、cpu):cpu 最受关注,压在最上层不被其他线盖住。
+    for (let i = chartActiveDefs.length - 1; i >= 0; i--) {
+      line(downsampled[i], chartActiveDefs[i].className, chartActiveDefs[i].colorVar);
+    }
 
-    // 悬浮的十字线和两个圆点:默认透明(见 CSS .guide/.hover-dot),指针移动时才显形。
+    // 悬浮的十字线和每条线各一个圆点:默认透明(见 CSS .guide/.hover-dot),指针移动时才显形。
     chartGuide = svg('line', { class: 'guide', x1: gutter, y1: top, x2: gutter, y2: top + plotH });
     chartEl.appendChild(chartGuide);
-    chartDotMem = svg('circle', { class: 'hover-dot', r: 3, fill: 'var(--rp-mem)' });
-    chartEl.appendChild(chartDotMem);
-    chartDotCpu = svg('circle', { class: 'hover-dot', r: 3, fill: 'var(--rp-cpu)' });
-    chartEl.appendChild(chartDotCpu);
+    chartDots = chartActiveDefs.map(function (def) {
+      const dot = svg('circle', { class: 'hover-dot', r: 3, fill: def.colorVar });
+      chartEl.appendChild(dot);
+      return dot;
+    });
 
-    chartData = { xs: xs, cpuVals: cpuVals, memVals: memVals, times: times, top: top, plotH: plotH };
+    chartData = {
+      xs: xs,
+      series: chartActiveDefs.map(function (def, i) { return { key: def.key, vals: downsampled[i] }; }),
+      times: times,
+      top: top,
+      plotH: plotH,
+      networkPeakRate: series.networkPeakRate,
+    };
 
     // 每轮采集都会重建以上这些元素:鼠标没动的话,在同一位置立刻把悬浮指示器画回去,
     // 否则用户停在某个点上看数值时,指示器会跟着 2 秒一次的刷新一起消失再出现。

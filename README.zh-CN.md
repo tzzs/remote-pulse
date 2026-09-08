@@ -28,7 +28,7 @@ $(pulse) CPU 85%  MEM 40%    ← 仅 CPU 越过警告阈值,变黄色——内�
 $(warning) CPU 28%  MEM 97%  ← 仅内存进入严重阈值,变红色——图标跟随两者中更严重的那个
 ```
 
-CPU 和内存是两个独立着色的状态栏项,图标始终显示两者中更严重的等级——和 VS Code 自带的远程连接指示器同一套绿/黄/红配色语言。
+CPU 和内存是两个独立着色的状态栏项,图标始终显示两者中更严重的等级——和 VS Code 自带的远程连接指示器同一套绿/黄/红配色语言。这几个颜色是写死的固定色值(不经过主题 token),不管状态栏实际背景是什么颜色都能保持清晰可辨。
 
 点击这三个项中的任意一个——或运行「Remote Pulse: Show Trend Chart」命令——弹出 30 分钟 CPU/内存趋势的折线图,以及磁盘/网络/GPU/Docker 详情(Webview,关闭即销毁,不常驻内存)。面板顶部的齿轮图标可以直接打开本插件的设置。
 
@@ -37,7 +37,7 @@ CPU 和内存是两个独立着色的状态栏项,图标始终显示两者中更
 - **CPU**:总体使用率、核心数(`/proc/stat` 增量算法,非 loadavg)
 - **内存**:使用率、已用/总量(`MemAvailable` 而非 `MemFree`,更贴近真实可用内存)
 - **磁盘**:各挂载点使用率(自动过滤虚拟文件系统,默认展示使用率 Top 3,或手动指定挂载点)
-- **网络**:上行/下行速率(默认关闭,减少趋势面板噪音)
+- **网络**:上行/下行速率,启用后还能作为第三条线画进过去 30 分钟的图表(按窗口内自身峰值归一化,因为网络速率不像 CPU/内存那样天然有 0-100% 的上限);默认关闭,减少趋势面板噪音
 - **GPU**:显存占用、利用率、温度(需要 `nvidia-smi`,不存在则模块整体不激活)
 - **Docker**:运行中容器数与各容器 CPU/内存占用(需要可访问 `/var/run/docker.sock`,无权限则静默降级)
 - **阈值告警**:CPU 和内存各自越过警告/严重阈值时独立变为黄色/红色,可选弹出系统通知(仅在"跨越"到严重态时通知一次,避免刷屏)
@@ -70,11 +70,8 @@ code --install-extension remote-pulse-0.1.0.vsix
 | `remotePulse.heavyMetricInterval` | `10000` | GPU/Docker 等低频指标独立轮询间隔(ms) |
 | `remotePulse.warningThreshold` | `80` | 告警阈值(%) |
 | `remotePulse.criticalThreshold` | `95` | 严重阈值(%) |
-| `remotePulse.template` | `"$(pulse) CPU ${cpu}%  MEM ${mem}%"` | 状态栏图标(只采用开头的 `$(图标)`——CPU/内存始终是两个独立着色的项) |
 | `remotePulse.statusBarMetrics` | `["cpu", "memory"]` | 状态栏要展示哪些指标(设置界面里是勾选框);未勾选的指标仍然能在趋势面板里看到 |
-| `remotePulse.enableGPU` | `true` | 是否探测并展示 GPU 信息 |
-| `remotePulse.enableDocker` | `true` | 是否探测并展示 Docker 容器信息 |
-| `remotePulse.enableNetwork` | `false` | 是否展示网络上下行速率 |
+| `remotePulse.trendPanelSections` | `["gpu", "docker"]` | 趋势面板要展示哪些可选区块(勾选框);System 和 Storage 始终展示。勾选 `network` 后,网络速率还会作为一条线画进过去 30 分钟的图表 |
 | `remotePulse.enableNotifications` | `false` | 越过严重阈值时是否弹出系统通知 |
 | `remotePulse.diskMountPoints` | `[]` | 指定要监控的挂载点,留空则自动选 Top 3 |
 

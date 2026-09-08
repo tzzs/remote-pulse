@@ -35,14 +35,16 @@ suite('Extension activation (integration)', () => {
     assert.equal(cfg.get('heavyMetricInterval'), 10000);
     assert.equal(cfg.get('warningThreshold'), 80);
     assert.equal(cfg.get('criticalThreshold'), 95);
-    assert.equal(cfg.get('template'), '$(pulse) CPU ${cpu}%  MEM ${mem}%');
     assert.deepEqual(cfg.get('statusBarMetrics'), ['cpu', 'memory']);
-    assert.equal(cfg.get('enableGPU'), true);
-    assert.equal(cfg.get('enableDocker'), true);
-    assert.equal(cfg.get('enableNetwork'), false);
+    assert.deepEqual(cfg.get('trendPanelSections'), ['gpu', 'docker']);
     assert.equal(cfg.get('enableNotifications'), false);
     assert.deepEqual(cfg.get('diskMountPoints'), []);
-    // 这个配置项已经在 status bar 改成同时展示 CPU+内存后删掉,这里顺带守一下不要被误加回来。
+    // 这两个配置项已经被删掉/合并进 statusBarMetrics、trendPanelSections,这里顺带守一下不要被误加回来。
     assert.equal(cfg.get('statusBarMetric'), undefined);
+    assert.equal(cfg.get('template'), undefined);
+    assert.equal(cfg.get('enableGpu'), undefined);
+    assert.equal(cfg.get('enableGPU'), undefined);
+    assert.equal(cfg.get('enableDocker'), undefined);
+    assert.equal(cfg.get('enableNetwork'), undefined);
   });
 });

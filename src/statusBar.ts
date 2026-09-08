@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { AlertLevel, CollectionState, Snapshot } from './types';
 import { RemotePulseConfig } from './config';
-import { calcAlertLevel, maxAlertLevel, foregroundColorIdFor } from './store/statsStore';
-import { iconGlyphFor } from './util/statusBarText';
+import { calcAlertLevel, maxAlertLevel, foregroundColorFor } from './store/statsStore';
+
+const NORMAL_ICON = '$(pulse)';
+const CRITICAL_ICON = '$(warning)';
 
 /** 状态栏本身最多只显示 CPU/内存两个数字(可通过 statusBarMetrics 单独隐藏其中一个),其余指标全部在趋势面板里——点击是进入面板的唯一入口。 */
 const SHOW_TREND_COMMAND = 'remotePulse.showTrend';
@@ -86,13 +88,13 @@ export class PulseStatusBar {
     const cpuText = cpuPercent !== undefined ? String(Math.round(cpuPercent)).padStart(2, ' ') : '--';
     const memText = memPercent !== undefined ? String(Math.round(memPercent)).padStart(2, ' ') : '--';
 
-    this.iconItem.text = iconGlyphFor(config.template, overallLevel === 'critical');
-    this.iconItem.color = this.foregroundColorFor(overallLevel);
+    this.iconItem.text = overallLevel === 'critical' ? CRITICAL_ICON : NORMAL_ICON;
+    this.iconItem.color = this.colorFor(overallLevel);
     this.iconItem.show();
 
     if (showCpu) {
       this.cpuItem.text = `CPU ${cpuText}%`;
-      this.cpuItem.color = this.foregroundColorFor(cpuLevel);
+      this.cpuItem.color = this.colorFor(cpuLevel);
       this.cpuItem.show();
       this.cpuVisible = true;
     } else {
@@ -102,7 +104,7 @@ export class PulseStatusBar {
 
     if (showMem) {
       this.memItem.text = `MEM ${memText}%`;
-      this.memItem.color = this.foregroundColorFor(memLevel);
+      this.memItem.color = this.colorFor(memLevel);
       this.memItem.show();
       this.memVisible = true;
     } else {
@@ -111,8 +113,11 @@ export class PulseStatusBar {
     }
   }
 
-  private foregroundColorFor(level: AlertLevel): vscode.ThemeColor {
-    return new vscode.ThemeColor(foregroundColorIdFor(level));
+  /** 写死的十六进制色值不跟随主题——但深浅两套取值仍然要跟着亮/暗主题切换,否则浅色主题下深色变体会反而看不清。 */
+  private colorFor(level: AlertLevel): string {
+    const kind = vscode.window.activeColorTheme.kind;
+    const isLight = kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight;
+    return foregroundColorFor(level, isLight);
   }
 
   /** 仅供集成测试读取当前渲染状态用,不做其他用途。 */

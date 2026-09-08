@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { StatsStore, calcAlertLevel, maxAlertLevel, foregroundColorIdFor } from '../src/store/statsStore';
+import { StatsStore, calcAlertLevel, maxAlertLevel, foregroundColorFor } from '../src/store/statsStore';
 
 test('calcAlertLevel 按阈值分级', () => {
   assert.equal(calcAlertLevel(50, 80, 95), 'normal');
@@ -15,10 +15,16 @@ test('maxAlertLevel 取多个级别里最严重的一个', () => {
   assert.equal(maxAlertLevel('normal', 'critical', 'warning'), 'critical');
 });
 
-test('foregroundColorIdFor 按级别映射三色告警语义色(用高亮的终端色系,在任意深色背景上都保持可辨识度)', () => {
-  assert.equal(foregroundColorIdFor('normal'), 'terminal.ansiBrightGreen');
-  assert.equal(foregroundColorIdFor('warning'), 'terminal.ansiBrightYellow');
-  assert.equal(foregroundColorIdFor('critical'), 'terminal.ansiBrightRed');
+test('foregroundColorFor 按级别映射固定十六进制色值,不经过任何主题 token', () => {
+  assert.equal(foregroundColorFor('normal', false), '#23d18b');
+  assert.equal(foregroundColorFor('warning', false), '#f5f543');
+  assert.equal(foregroundColorFor('critical', false), '#f14c4c');
+});
+
+test('foregroundColorFor 浅色主题下用更深的一套取值,保证在白色背景上仍有对比度', () => {
+  assert.equal(foregroundColorFor('normal', true), '#16794f');
+  assert.equal(foregroundColorFor('warning', true), '#9a6700');
+  assert.equal(foregroundColorFor('critical', true), '#cf222e');
 });
 
 test('StatsStore.recentValues 只返回窗口内且已定义的数值', () => {

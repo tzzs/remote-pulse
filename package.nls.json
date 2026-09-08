@@ -7,13 +7,13 @@
   "config.heavyMetricInterval.description": "Separate polling interval for low-frequency metrics like GPU/Docker, in milliseconds",
   "config.warningThreshold.description": "Warning threshold (percentage); the status bar switches to the warning color above it",
   "config.criticalThreshold.description": "Critical threshold (percentage); the status bar switches to the critical color above it",
-  "config.template.description": "Status bar icon; CPU and memory are always shown as separate, independently colored items — only the leading $(icon) from this template is used (swapped for a warning triangle when either metric goes critical)",
   "config.statusBarMetrics.description": "Which metrics to show as status bar items (checkboxes); the rest still appear in the trend panel",
   "config.statusBarMetrics.cpu.description": "CPU usage",
   "config.statusBarMetrics.memory.description": "Memory usage",
-  "config.enableGPU.description": "Whether to detect and show GPU info (requires nvidia-smi)",
-  "config.enableDocker.description": "Whether to detect and show Docker container info (requires access to docker.sock)",
-  "config.enableNetwork.description": "Whether to show network upload/download rates in the trend panel",
+  "config.trendPanelSections.description": "Which optional sections to show in the trend panel (checkboxes); System and Storage are always shown",
+  "config.trendPanelSections.network.description": "Network upload/download rate, also plotted as a line in the 30-minute chart",
+  "config.trendPanelSections.gpu.description": "GPU info (requires nvidia-smi)",
+  "config.trendPanelSections.docker.description": "Docker container info (requires access to docker.sock)",
   "config.enableNotifications.description": "Whether to show a system notification when the critical threshold is crossed",
   "config.diskMountPoints.description": "Disk mount points to monitor; leave empty to auto-select the one with the highest usage"
 }

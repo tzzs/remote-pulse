@@ -96,7 +96,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
       light.cpu = cpu;
       light.memory = memory;
       light.disks = disks;
-      light.network = config.enableNetwork ? await networkCollector.collect() : undefined;
+      light.network = config.trendPanelSections.includes('network') ? await networkCollector.collect() : undefined;
       if (cpu) {
         state = 'ok';
       }
@@ -108,8 +108,8 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
   }
 
   async function collectHeavy(): Promise<void> {
-    heavy.gpus = config.enableGPU ? await gpuCollector.collect() : undefined;
-    heavy.docker = config.enableDocker ? await dockerCollector.collect() : undefined;
+    heavy.gpus = config.trendPanelSections.includes('gpu') ? await gpuCollector.collect() : undefined;
+    heavy.docker = config.trendPanelSections.includes('docker') ? await dockerCollector.collect() : undefined;
   }
 
   const lightPoller = new Poller(collectLight, config.refreshInterval);
@@ -217,20 +217,34 @@ function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendP
   const cutoff = Date.now() - TREND_WINDOW_MS;
   const windowed = history.filter(s => s.timestamp >= cutoff);
   const latestSnapshot = store.latest();
+  const showNetwork = config.trendPanelSections.includes('network');
+
+  let network: number[] | undefined;
+  let networkPeakRate: number | undefined;
+  if (showNetwork) {
+    // 网络速率没有 CPU/内存那种天然的 0-100 上限,没法直接跟它们共用同一根 y 轴——
+    // 归一化到"这 30 分钟窗口里的自身峰值"上,图表看的是相对波动,峰值随窗口滚动会变,
+    // 原始速率数值仍然通过 networkPeakRate 还原,展示在图例和悬浮提示里。
+    const totals = windowed.map(s => (s.network ? s.network.rxRate + s.network.txRate : 0));
+    networkPeakRate = Math.max(1, ...totals);
+    network = totals.map(v => (v / (networkPeakRate as number)) * 100);
+  }
 
   return {
     series: {
       timestamps: windowed.map(s => s.timestamp),
       cpu: windowed.map(s => s.cpu?.percent ?? 0),
       memory: windowed.map(s => s.memory?.percent ?? 0),
+      network,
+      networkPeakRate,
     },
     latest: latestSnapshot && {
       cpu: latestSnapshot.cpu,
       memory: latestSnapshot.memory,
       disks: latestSnapshot.disks ?? [],
-      network: config.enableNetwork ? latestSnapshot.network : undefined,
-      gpus: config.enableGPU ? (latestSnapshot.gpus ?? []) : [],
-      docker: config.enableDocker ? latestSnapshot.docker : undefined,
+      network: showNetwork ? latestSnapshot.network : undefined,
+      gpus: config.trendPanelSections.includes('gpu') ? (latestSnapshot.gpus ?? []) : [],
+      docker: config.trendPanelSections.includes('docker') ? latestSnapshot.docker : undefined,
       uptimeSeconds: latestSnapshot.uptimeSeconds,
     },
     thresholds: { warning: config.warningThreshold, critical: config.criticalThreshold },

@@ -86,11 +86,6 @@
           "maximum": 100,
           "description": "%config.criticalThreshold.description%"
         },
-        "remotePulse.template": {
-          "type": "string",
-          "default": "$(pulse) CPU ${cpu}%  MEM ${mem}%",
-          "description": "%config.template.description%"
-        },
         "remotePulse.statusBarMetrics": {
           "type": "array",
           "items": {
@@ -102,20 +97,20 @@
           "default": ["cpu", "memory"],
           "description": "%config.statusBarMetrics.description%"
         },
-        "remotePulse.enableGPU": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.enableGPU.description%"
-        },
-        "remotePulse.enableDocker": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.enableDocker.description%"
-        },
-        "remotePulse.enableNetwork": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.enableNetwork.description%"
+        "remotePulse.trendPanelSections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["network", "gpu", "docker"],
+            "enumDescriptions": [
+              "%config.trendPanelSections.network.description%",
+              "%config.trendPanelSections.gpu.description%",
+              "%config.trendPanelSections.docker.description%"
+            ]
+          },
+          "uniqueItems": true,
+          "default": ["gpu", "docker"],
+          "description": "%config.trendPanelSections.description%"
         },
         "remotePulse.enableNotifications": {
           "type": "boolean",

@@ -52,18 +52,24 @@ export function maxAlertLevel(...levels: AlertLevel[]): AlertLevel {
 }
 
 /**
- * CPU 和内存现在拆成两个独立的状态栏项,各自按级别显示绿/黄/红——所以不再需要用整条背景色
- * 表达"是否越阈值"(背景色只能整项统一改变,没法区分 CPU 和内存谁出的问题)。改用
- * terminal.ansiBright* 色系而不是更暗淡的 charts.*:状态栏背景可能被 Remote-SSH/WSL 指示器、
- * 主题、Vim 模式插件改成任意深色(比如深青色),charts.green 在这类背景上和背景本身糊在一起,
- * 而终端的"高亮"色系天生就是为了在任意深色背景上保持可辨识度设计的,对比度明显更高。
+ * 用固定十六进制颜色而不是主题 token(之前是 charts.*,后来改成 terminal.ansiBright*)——
+ * 两者都在某些主题下被重新定义成偏灰、偏淡的取值,状态栏背景又可能被 Remote-SSH/WSL 指示器、
+ * 主题、Vim 模式插件改成任意深色(比如深青色),依赖 token 就意味着颜色能不能看清完全赌
+ * 用户当前主题怎么定义它。写死具体色值不会被任何主题重新解释,始终是同一个鲜艳的绿/黄/红。
+ * 仅根据明暗两套取值(而不是逐主题适配),在浅色背景下用更深、更饱和的版本保证对比度。
  */
-export function foregroundColorIdFor(level: AlertLevel): string {
-  if (level === 'critical') {
-    return 'terminal.ansiBrightRed';
-  }
-  if (level === 'warning') {
-    return 'terminal.ansiBrightYellow';
-  }
-  return 'terminal.ansiBrightGreen';
+const DARK_THEME_COLORS: Record<AlertLevel, string> = {
+  normal: '#23d18b',
+  warning: '#f5f543',
+  critical: '#f14c4c',
+};
+
+const LIGHT_THEME_COLORS: Record<AlertLevel, string> = {
+  normal: '#16794f',
+  warning: '#9a6700',
+  critical: '#cf222e',
+};
+
+export function foregroundColorFor(level: AlertLevel, isLightTheme: boolean): string {
+  return (isLightTheme ? LIGHT_THEME_COLORS : DARK_THEME_COLORS)[level];
 }
