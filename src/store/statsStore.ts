@@ -52,17 +52,17 @@ export function maxAlertLevel(...levels: AlertLevel[]): AlertLevel {
 }
 
 /**
- * VS Code 状态栏背景色官方只承认 error/warning 两种语义色,normal 态没有对应背景。
- * 正常态特意不设自定义前景色——状态栏背景会被 Vim 模式、Remote 连接等其他扩展/场景动态改变,
- * 而 vscode API 不提供读取"当前实际背景色"的方式,自己挑一个固定颜色必然会在某些背景下失去对比度;
- * 不设置就直接沿用主题的 statusBar.foreground,那才是跟着背景联动、始终保证可读的颜色。
+ * CPU 和内存现在拆成两个独立的状态栏项,各自按级别显示绿/橙/红——所以不再需要用整条背景色
+ * 表达"是否越阈值"(背景色只能整项统一改变,没法区分 CPU 和内存谁出的问题)。改用
+ * charts.* 语义色系(VS Code 状态栏/图表通用的三色告警语言,浅色主题下也有对应取值),
+ * 直接作为文字前景色,与 VS Code 自带的远程连接指示器同一套视觉语言。
  */
-export function backgroundColorIdFor(level: AlertLevel): string | undefined {
+export function foregroundColorIdFor(level: AlertLevel): string {
   if (level === 'critical') {
-    return 'statusBarItem.errorBackground';
+    return 'charts.red';
   }
   if (level === 'warning') {
-    return 'statusBarItem.warningBackground';
+    return 'charts.orange';
   }
-  return undefined;
+  return 'charts.green';
 }

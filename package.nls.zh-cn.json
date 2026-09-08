@@ -7,7 +7,7 @@
   "config.heavyMetricInterval.description": "GPU/Docker 等低频指标的独立轮询间隔,单位毫秒",
   "config.warningThreshold.description": "告警阈值(百分比),超过后状态栏变为警告色",
   "config.criticalThreshold.description": "严重阈值(百分比),超过后状态栏变为严重告警色",
-  "config.template.description": "状态栏显示模板,${cpu} 和 ${mem} 会被替换为当前 CPU/内存百分比",
+  "config.template.description": "状态栏图标;CPU 和内存始终作为两个独立着色的项分别展示——这里只有开头的 $(图标) 会被采用(任一指标进入严重态时会换成警告三角图标)",
   "config.enableGpu.description": "是否探测并展示 GPU 信息(需要 nvidia-smi)",
   "config.enableDocker.description": "是否探测并展示 Docker 容器信息(需要可访问 docker.sock)",
   "config.enableNetwork.description": "是否在趋势面板中展示网络上下行速率",

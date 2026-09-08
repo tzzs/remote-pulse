@@ -1,21 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderStatusBarText } from '../src/util/statusBarText';
+import { iconGlyphFor } from '../src/util/statusBarText';
 
 const TEMPLATE = '$(pulse) CPU ${cpu}%  MEM ${mem}%';
 
-test('renderStatusBarText 替换 cpu/mem 占位符', () => {
-  assert.equal(renderStatusBarText(TEMPLATE, '12', '34', false), '$(pulse) CPU 12%  MEM 34%');
+test('iconGlyphFor 从模板开头抠出图标', () => {
+  assert.equal(iconGlyphFor(TEMPLATE, false), '$(pulse)');
 });
 
-test('renderStatusBarText 严重态时把开头图标换成警告图标', () => {
-  assert.equal(renderStatusBarText(TEMPLATE, '99', '10', true), '$(warning) CPU 99%  MEM 10%');
+test('iconGlyphFor 支持自定义图标', () => {
+  assert.equal(iconGlyphFor('$(dashboard) CPU ${cpu}%  MEM ${mem}%', false), '$(dashboard)');
 });
 
-test('renderStatusBarText 非严重态保留原图标', () => {
-  assert.equal(renderStatusBarText(TEMPLATE, '10', '10', false).startsWith('$(pulse)'), true);
+test('iconGlyphFor 严重态时把图标换成警告图标,忽略模板本身的图标', () => {
+  assert.equal(iconGlyphFor(TEMPLATE, true), '$(warning)');
+  assert.equal(iconGlyphFor('$(dashboard) CPU ${cpu}%  MEM ${mem}%', true), '$(warning)');
 });
 
-test('renderStatusBarText 遇到不认识占位符的旧模板(如 ${value})时兜底成新默认模板', () => {
-  assert.equal(renderStatusBarText('$(pulse) ${value}%', '12', '34', false), '$(pulse) CPU 12%  MEM 34%');
+test('iconGlyphFor 模板不以图标开头时兜底成默认图标', () => {
+  assert.equal(iconGlyphFor('CPU ${cpu}%  MEM ${mem}%', false), '$(pulse)');
 });

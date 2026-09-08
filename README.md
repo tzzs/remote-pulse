@@ -15,7 +15,7 @@ Most similar extensions just move a full dashboard into the status bar: dense, a
 | Aspect | Common approach elsewhere | Remote Pulse |
 |---|---|---|
 | Always-on footprint | CPU\|MEM\|DISK all shown flat | Just 1 icon + 1 core number by default; everything else lives in the trend panel |
-| Visual tone | Value-driven coloring at all times | Neutral by default; only colors up when a threshold is crossed |
+| Visual tone | Value-driven coloring at all times | CPU and memory each colored on a green/orange/red scale, independently of each other — the same visual language as VS Code's own remote-connection indicator |
 | Interaction | Some require opening a sidebar | Click to pop a lightweight Webview — no persistent space used, no trace left after closing |
 | Resource cost | Some poll via spawned subprocesses | Reads `/proc` directly; zero steady-state subprocess overhead for core metrics |
 | Context awareness | Polls at the same rate whether focused or not | Automatically throttles when the window loses focus |
@@ -23,11 +23,14 @@ Most similar extensions just move a full dashboard into the status bar: dense, a
 ## Preview
 
 ```
-Default: $(pulse) 23%
-Alert:   $(warning) 92%   ← status bar background turns warning/critical color
+$(pulse) CPU 23%  MEM 61%    ← all normal, colored green
+$(pulse) CPU 85%  MEM 40%    ← CPU alone crosses warning, turns orange — memory stays green
+$(warning) CPU 28%  MEM 97%  ← memory alone goes critical, turns red — the icon follows the worse of the two
 ```
 
-Click the status bar item — or run `Remote Pulse: Show Trend Chart` — to open a line chart of the last 30 minutes of CPU/memory history, plus disk/network/GPU/Docker detail (a Webview that's destroyed on close — nothing stays resident in memory).
+CPU and memory are two independently colored status bar items, plus a shared icon that always reflects whichever of the two is worse — the same green/orange/red language VS Code's own remote-connection indicator uses.
+
+Click any of the three items — or run `Remote Pulse: Show Trend Chart` — to open a line chart of the last 30 minutes of CPU/memory history, plus disk/network/GPU/Docker detail (a Webview that's destroyed on close — nothing stays resident in memory). A gear icon in the panel header opens this extension's settings directly.
 
 ## Features
 
@@ -37,7 +40,7 @@ Click the status bar item — or run `Remote Pulse: Show Trend Chart` — to ope
 - **Network**: upload/download rate (disabled by default to keep the trend panel uncluttered)
 - **GPU**: VRAM usage, utilization, temperature (requires `nvidia-smi`; the module simply stays inactive if it's unavailable)
 - **Docker**: running container count plus per-container CPU/memory usage (requires access to `/var/run/docker.sock`; degrades silently without permission)
-- **Threshold alerts**: the status bar changes color when CPU/memory crosses a threshold, with an optional system notification (fires once per crossing into the critical state, so it won't spam you)
+- **Threshold alerts**: CPU and memory each turn green/orange/red independently as they cross the warning/critical thresholds, with an optional system notification (fires once per crossing into the critical state, so it won't spam you)
 - **History trend**: a Webview line chart of the last 30 minutes
 - **Adaptive polling**: automatically throttles once the window loses focus, reducing load on the remote machine
 - **Localized UI**: commands, settings, and the status bar/webview text follow VS Code's display language (English by default, with a 简体中文 translation)

@@ -74,6 +74,7 @@ type PanelGroup =
 interface PanelModel {
   host: { name: string; meta: string; user?: string };
   updated: string;
+  settingsLabel: string;
   groups: PanelGroup[];
   series: { timestamps: number[]; cpu: number[]; memory: number[] };
 }
@@ -121,6 +122,8 @@ export class TrendPanel {
       message => {
         if (message?.type === 'ready' && this.lastModel) {
           void this.panel.webview.postMessage({ type: 'model', model: this.lastModel });
+        } else if (message?.type === 'openSettings') {
+          void vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tanzz.remote-pulse');
         }
       },
       null,
@@ -288,6 +291,7 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
   return {
     host: { ...splitHostLabel(host.label), user: host.user },
     updated: vscode.l10n.t('Updated {0}', updatedAt),
+    settingsLabel: vscode.l10n.t('Open Remote Pulse Settings'),
     groups,
     series: { timestamps: series.timestamps, cpu: series.cpu, memory: series.memory },
   };
@@ -330,6 +334,13 @@ const PANEL_CSS = `
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .host-meta { font-size: 11px; line-height: 16px; color: var(--rp-muted); min-width: 0;
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .host-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .icon-btn { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+              padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--rp-muted);
+              cursor: pointer; }
+  .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+                     color: var(--vscode-foreground); }
+  .icon-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 
   .section { margin-top: 26px; }
   .section-head { display: flex; align-items: center; gap: 8px; min-height: 20px;
@@ -464,6 +475,16 @@ const PANEL_SCRIPT = `
     return node;
   }
 
+  function gearIcon() {
+    const node = svg('svg', { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true' });
+    node.appendChild(svg('circle', { cx: 8, cy: 8, r: 2.8, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.2 }));
+    node.appendChild(svg('path', {
+      d: 'M8 1.4V2.8M8 13.2V14.6M14.6 8H13.2M2.8 8H1.4M12.66 3.34L11.66 4.34M4.34 11.66L3.34 12.66M12.66 12.66L11.66 11.66M4.34 4.34L3.34 3.34',
+      stroke: 'currentColor', 'stroke-width': 1.15, 'stroke-linecap': 'round',
+    }));
+    return node;
+  }
+
   /** 结构不变就只改文字和条宽,避免每 2 秒重建 DOM 打断用户的文字选中。 */
   function shapeOf(m) {
     return JSON.stringify(m.groups.map(function (g) {
@@ -504,9 +525,19 @@ const PANEL_SCRIPT = `
       id.appendChild(meta);
     }
     host.appendChild(id);
-    const updated = el('div', 'host-meta', m.updated);
-    host.appendChild(updated);
+    const actions = el('div', 'host-actions');
+    const updated = el('span', 'host-meta', m.updated);
+    actions.appendChild(updated);
     slots.push({ kind: 'updated', node: updated });
+    const settingsBtn = document.createElement('button');
+    settingsBtn.type = 'button';
+    settingsBtn.className = 'icon-btn';
+    settingsBtn.title = m.settingsLabel;
+    settingsBtn.setAttribute('aria-label', m.settingsLabel);
+    settingsBtn.appendChild(gearIcon());
+    settingsBtn.addEventListener('click', function () { vscode.postMessage({ type: 'openSettings' }); });
+    actions.appendChild(settingsBtn);
+    host.appendChild(actions);
     frag.appendChild(host);
 
     for (const group of m.groups) {
