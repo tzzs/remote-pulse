@@ -12,7 +12,8 @@ function baseConfig(overrides: Partial<RemotePulseConfig> = {}): RemotePulseConf
     warningThreshold: 80,
     criticalThreshold: 95,
     template: '$(pulse) CPU ${cpu}%  MEM ${mem}%',
-    enableGpu: true,
+    statusBarMetrics: ['cpu', 'memory'],
+    enableGPU: true,
     enableDocker: true,
     enableNetwork: false,
     enableNotifications: false,
@@ -80,34 +81,34 @@ suite('PulseStatusBar (integration)', () => {
   test('normal level colors the icon, CPU and memory green independently', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith(), baseConfig(), 'ok');
-    assert.equal(colorId(bar.debugState.icon.color), 'charts.green');
-    assert.equal(colorId(bar.debugState.cpu.color), 'charts.green');
-    assert.equal(colorId(bar.debugState.mem.color), 'charts.green');
+    assert.equal(colorId(bar.debugState.icon.color), 'terminal.ansiBrightGreen');
+    assert.equal(colorId(bar.debugState.cpu.color), 'terminal.ansiBrightGreen');
+    assert.equal(colorId(bar.debugState.mem.color), 'terminal.ansiBrightGreen');
   });
 
-  test('CPU crossing warning colors only the CPU item and the icon orange, memory stays green', () => {
+  test('CPU crossing warning colors only the CPU item and the icon yellow, memory stays green', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith({ cpu: { percent: 85, cores: 4 } }), baseConfig(), 'ok');
-    assert.equal(colorId(bar.debugState.cpu.color), 'charts.orange');
-    assert.equal(colorId(bar.debugState.mem.color), 'charts.green');
-    assert.equal(colorId(bar.debugState.icon.color), 'charts.orange');
+    assert.equal(colorId(bar.debugState.cpu.color), 'terminal.ansiBrightYellow');
+    assert.equal(colorId(bar.debugState.mem.color), 'terminal.ansiBrightGreen');
+    assert.equal(colorId(bar.debugState.icon.color), 'terminal.ansiBrightYellow');
   });
 
   test('memory going critical alone colors only memory and the icon red, CPU stays green, and the icon glyph swaps to the warning triangle', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith({ memory: { total: 100, used: 99, available: 1, percent: 99 } }), baseConfig(), 'ok');
-    assert.equal(colorId(bar.debugState.mem.color), 'charts.red');
-    assert.equal(colorId(bar.debugState.cpu.color), 'charts.green');
-    assert.equal(colorId(bar.debugState.icon.color), 'charts.red');
+    assert.equal(colorId(bar.debugState.mem.color), 'terminal.ansiBrightRed');
+    assert.equal(colorId(bar.debugState.cpu.color), 'terminal.ansiBrightGreen');
+    assert.equal(colorId(bar.debugState.icon.color), 'terminal.ansiBrightRed');
     assert.equal(bar.debugState.icon.text, '$(warning)');
   });
 
   test('CPU critical and memory warning at once keep their own colors, icon follows the worse of the two', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith({ cpu: { percent: 96, cores: 4 }, memory: { total: 100, used: 82, available: 18, percent: 82 } }), baseConfig(), 'ok');
-    assert.equal(colorId(bar.debugState.cpu.color), 'charts.red');
-    assert.equal(colorId(bar.debugState.mem.color), 'charts.orange');
-    assert.equal(colorId(bar.debugState.icon.color), 'charts.red');
+    assert.equal(colorId(bar.debugState.cpu.color), 'terminal.ansiBrightRed');
+    assert.equal(colorId(bar.debugState.mem.color), 'terminal.ansiBrightYellow');
+    assert.equal(colorId(bar.debugState.icon.color), 'terminal.ansiBrightRed');
   });
 
   test('has no tooltip, so hovering over the status bar items shows nothing', () => {
@@ -124,6 +125,26 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(bar.debugState.icon.text, '$(circle-slash)');
     assert.equal(bar.debugState.cpu.visible, false);
     assert.equal(bar.debugState.mem.visible, false);
+  });
+
+  test('statusBarMetrics can hide memory, leaving only CPU visible and the icon following CPU alone', () => {
+    bar = new PulseStatusBar();
+    bar.update(
+      snapshotWith({ memory: { total: 100, used: 99, available: 1, percent: 99 } }),
+      baseConfig({ statusBarMetrics: ['cpu'] }),
+      'ok',
+    );
+    assert.equal(bar.debugState.cpu.visible, true);
+    assert.equal(bar.debugState.mem.visible, false);
+    // 内存被隐藏,即使它已经严重超标,图标也只看 CPU(正常态),不该被隐藏的指标带偏。
+    assert.equal(colorId(bar.debugState.icon.color), 'terminal.ansiBrightGreen');
+  });
+
+  test('statusBarMetrics can hide CPU, leaving only memory visible', () => {
+    bar = new PulseStatusBar();
+    bar.update(snapshotWith(), baseConfig({ statusBarMetrics: ['memory'] }), 'ok');
+    assert.equal(bar.debugState.cpu.visible, false);
+    assert.equal(bar.debugState.mem.visible, true);
   });
 
   // 悬浮 tooltip 已移除,磁盘/网络/GPU/Docker 只在趋势面板里能看到,

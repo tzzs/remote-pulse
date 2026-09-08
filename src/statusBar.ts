@@ -4,7 +4,7 @@ import { RemotePulseConfig } from './config';
 import { calcAlertLevel, maxAlertLevel, foregroundColorIdFor } from './store/statsStore';
 import { iconGlyphFor } from './util/statusBarText';
 
-/** 状态栏本身只显示 CPU/内存两个数字,其余指标全部在趋势面板里——点击是进入面板的唯一入口。 */
+/** 状态栏本身最多只显示 CPU/内存两个数字(可通过 statusBarMetrics 单独隐藏其中一个),其余指标全部在趋势面板里——点击是进入面板的唯一入口。 */
 const SHOW_TREND_COMMAND = 'remotePulse.showTrend';
 
 /** 单个 StatusBarItem 只能有一种颜色,CPU 和内存要各自独立变色,图标还要反映两者里更严重的一个——
@@ -68,9 +68,20 @@ export class PulseStatusBar {
       return;
     }
 
+    const showCpu = config.statusBarMetrics.includes('cpu');
+    const showMem = config.statusBarMetrics.includes('memory');
+
     const cpuLevel = cpuPercent !== undefined ? calcAlertLevel(cpuPercent, config.warningThreshold, config.criticalThreshold) : 'normal';
     const memLevel = memPercent !== undefined ? calcAlertLevel(memPercent, config.warningThreshold, config.criticalThreshold) : 'normal';
-    const overallLevel = maxAlertLevel(cpuLevel, memLevel);
+    // 图标只反映用户实际勾选展示的那些指标——隐藏掉的指标即使越阈值,也不该影响图标颜色。
+    const consideredLevels: AlertLevel[] = [];
+    if (showCpu) {
+      consideredLevels.push(cpuLevel);
+    }
+    if (showMem) {
+      consideredLevels.push(memLevel);
+    }
+    const overallLevel = maxAlertLevel(...consideredLevels);
 
     const cpuText = cpuPercent !== undefined ? String(Math.round(cpuPercent)).padStart(2, ' ') : '--';
     const memText = memPercent !== undefined ? String(Math.round(memPercent)).padStart(2, ' ') : '--';
@@ -79,15 +90,25 @@ export class PulseStatusBar {
     this.iconItem.color = this.foregroundColorFor(overallLevel);
     this.iconItem.show();
 
-    this.cpuItem.text = `CPU ${cpuText}%`;
-    this.cpuItem.color = this.foregroundColorFor(cpuLevel);
-    this.cpuItem.show();
-    this.cpuVisible = true;
+    if (showCpu) {
+      this.cpuItem.text = `CPU ${cpuText}%`;
+      this.cpuItem.color = this.foregroundColorFor(cpuLevel);
+      this.cpuItem.show();
+      this.cpuVisible = true;
+    } else {
+      this.cpuItem.hide();
+      this.cpuVisible = false;
+    }
 
-    this.memItem.text = `MEM ${memText}%`;
-    this.memItem.color = this.foregroundColorFor(memLevel);
-    this.memItem.show();
-    this.memVisible = true;
+    if (showMem) {
+      this.memItem.text = `MEM ${memText}%`;
+      this.memItem.color = this.foregroundColorFor(memLevel);
+      this.memItem.show();
+      this.memVisible = true;
+    } else {
+      this.memItem.hide();
+      this.memVisible = false;
+    }
   }
 
   private foregroundColorFor(level: AlertLevel): vscode.ThemeColor {

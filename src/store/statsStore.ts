@@ -52,17 +52,18 @@ export function maxAlertLevel(...levels: AlertLevel[]): AlertLevel {
 }
 
 /**
- * CPU 和内存现在拆成两个独立的状态栏项,各自按级别显示绿/橙/红——所以不再需要用整条背景色
+ * CPU 和内存现在拆成两个独立的状态栏项,各自按级别显示绿/黄/红——所以不再需要用整条背景色
  * 表达"是否越阈值"(背景色只能整项统一改变,没法区分 CPU 和内存谁出的问题)。改用
- * charts.* 语义色系(VS Code 状态栏/图表通用的三色告警语言,浅色主题下也有对应取值),
- * 直接作为文字前景色,与 VS Code 自带的远程连接指示器同一套视觉语言。
+ * terminal.ansiBright* 色系而不是更暗淡的 charts.*:状态栏背景可能被 Remote-SSH/WSL 指示器、
+ * 主题、Vim 模式插件改成任意深色(比如深青色),charts.green 在这类背景上和背景本身糊在一起,
+ * 而终端的"高亮"色系天生就是为了在任意深色背景上保持可辨识度设计的,对比度明显更高。
  */
 export function foregroundColorIdFor(level: AlertLevel): string {
   if (level === 'critical') {
-    return 'charts.red';
+    return 'terminal.ansiBrightRed';
   }
   if (level === 'warning') {
-    return 'charts.orange';
+    return 'terminal.ansiBrightYellow';
   }
-  return 'charts.green';
+  return 'terminal.ansiBrightGreen';
 }

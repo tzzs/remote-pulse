@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { DEFAULT_STATUS_BAR_TEMPLATE } from './util/statusBarText';
 
+export type StatusBarMetric = 'cpu' | 'memory';
+
 export interface RemotePulseConfig {
   refreshInterval: number;
   backgroundInterval: number;
@@ -8,7 +10,8 @@ export interface RemotePulseConfig {
   warningThreshold: number;
   criticalThreshold: number;
   template: string;
-  enableGpu: boolean;
+  statusBarMetrics: StatusBarMetric[];
+  enableGPU: boolean;
   enableDocker: boolean;
   enableNetwork: boolean;
   enableNotifications: boolean;
@@ -16,6 +19,7 @@ export interface RemotePulseConfig {
 }
 
 const SECTION = 'remotePulse';
+const DEFAULT_STATUS_BAR_METRICS: StatusBarMetric[] = ['cpu', 'memory'];
 
 export function readConfig(): RemotePulseConfig {
   const cfg = vscode.workspace.getConfiguration(SECTION);
@@ -26,7 +30,8 @@ export function readConfig(): RemotePulseConfig {
     warningThreshold: cfg.get<number>('warningThreshold', 80),
     criticalThreshold: cfg.get<number>('criticalThreshold', 95),
     template: cfg.get<string>('template', DEFAULT_STATUS_BAR_TEMPLATE),
-    enableGpu: cfg.get<boolean>('enableGpu', true),
+    statusBarMetrics: cfg.get<StatusBarMetric[]>('statusBarMetrics', DEFAULT_STATUS_BAR_METRICS),
+    enableGPU: cfg.get<boolean>('enableGPU', true),
     enableDocker: cfg.get<boolean>('enableDocker', true),
     enableNetwork: cfg.get<boolean>('enableNetwork', false),
     enableNotifications: cfg.get<boolean>('enableNotifications', false),

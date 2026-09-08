@@ -108,7 +108,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
   }
 
   async function collectHeavy(): Promise<void> {
-    heavy.gpus = config.enableGpu ? await gpuCollector.collect() : undefined;
+    heavy.gpus = config.enableGPU ? await gpuCollector.collect() : undefined;
     heavy.docker = config.enableDocker ? await dockerCollector.collect() : undefined;
   }
 
@@ -229,7 +229,7 @@ function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendP
       memory: latestSnapshot.memory,
       disks: latestSnapshot.disks ?? [],
       network: config.enableNetwork ? latestSnapshot.network : undefined,
-      gpus: config.enableGpu ? (latestSnapshot.gpus ?? []) : [],
+      gpus: config.enableGPU ? (latestSnapshot.gpus ?? []) : [],
       docker: config.enableDocker ? latestSnapshot.docker : undefined,
       uptimeSeconds: latestSnapshot.uptimeSeconds,
     },

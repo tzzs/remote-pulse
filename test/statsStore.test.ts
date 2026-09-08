@@ -15,10 +15,10 @@ test('maxAlertLevel 取多个级别里最严重的一个', () => {
   assert.equal(maxAlertLevel('normal', 'critical', 'warning'), 'critical');
 });
 
-test('foregroundColorIdFor 按级别映射三色告警语义色', () => {
-  assert.equal(foregroundColorIdFor('normal'), 'charts.green');
-  assert.equal(foregroundColorIdFor('warning'), 'charts.orange');
-  assert.equal(foregroundColorIdFor('critical'), 'charts.red');
+test('foregroundColorIdFor 按级别映射三色告警语义色(用高亮的终端色系,在任意深色背景上都保持可辨识度)', () => {
+  assert.equal(foregroundColorIdFor('normal'), 'terminal.ansiBrightGreen');
+  assert.equal(foregroundColorIdFor('warning'), 'terminal.ansiBrightYellow');
+  assert.equal(foregroundColorIdFor('critical'), 'terminal.ansiBrightRed');
 });
 
 test('StatsStore.recentValues 只返回窗口内且已定义的数值', () => {

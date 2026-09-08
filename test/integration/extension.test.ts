@@ -36,7 +36,8 @@ suite('Extension activation (integration)', () => {
     assert.equal(cfg.get('warningThreshold'), 80);
     assert.equal(cfg.get('criticalThreshold'), 95);
     assert.equal(cfg.get('template'), '$(pulse) CPU ${cpu}%  MEM ${mem}%');
-    assert.equal(cfg.get('enableGpu'), true);
+    assert.deepEqual(cfg.get('statusBarMetrics'), ['cpu', 'memory']);
+    assert.equal(cfg.get('enableGPU'), true);
     assert.equal(cfg.get('enableDocker'), true);
     assert.equal(cfg.get('enableNetwork'), false);
     assert.equal(cfg.get('enableNotifications'), false);

@@ -91,10 +91,21 @@
           "default": "$(pulse) CPU ${cpu}%  MEM ${mem}%",
           "description": "%config.template.description%"
         },
-        "remotePulse.enableGpu": {
+        "remotePulse.statusBarMetrics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["cpu", "memory"],
+            "enumDescriptions": ["%config.statusBarMetrics.cpu.description%", "%config.statusBarMetrics.memory.description%"]
+          },
+          "uniqueItems": true,
+          "default": ["cpu", "memory"],
+          "description": "%config.statusBarMetrics.description%"
+        },
+        "remotePulse.enableGPU": {
           "type": "boolean",
           "default": true,
-          "description": "%config.enableGpu.description%"
+          "description": "%config.enableGPU.description%"
         },
         "remotePulse.enableDocker": {
           "type": "boolean",

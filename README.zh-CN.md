@@ -15,7 +15,7 @@
 | 维度 | 现有插件普遍做法 | Remote Pulse |
 |---|---|---|
 | 常驻信息量 | CPU\|MEM\|DISK 全部平铺 | 默认只有 1 个 icon + 1 个核心数字,其余进趋势面板 |
-| 视觉基调 | 数值常态化配色 | CPU 和内存各自按绿/橙/红独立变色,互不影响——和 VS Code 自带的远程连接指示器同一套视觉语言 |
+| 视觉基调 | 数值常态化配色 | CPU 和内存各自按绿/黄/红独立变色,互不影响——和 VS Code 自带的远程连接指示器同一套视觉语言 |
 | 交互 | 部分需开侧边栏 | 点击弹出轻量 Webview,不占用常驻空间,关闭不留痕迹 |
 | 资源开销 | 部分用 spawn 子进程轮询 | 直读 `/proc`,核心指标零子进程常态开销 |
 | 场景感知 | 前后台一致轮询 | 窗口失焦自动降频 |
@@ -24,11 +24,11 @@
 
 ```
 $(pulse) CPU 23%  MEM 61%    ← 全部正常,绿色
-$(pulse) CPU 85%  MEM 40%    ← 仅 CPU 越过警告阈值,变橙色——内存保持绿色
+$(pulse) CPU 85%  MEM 40%    ← 仅 CPU 越过警告阈值,变黄色——内存保持绿色
 $(warning) CPU 28%  MEM 97%  ← 仅内存进入严重阈值,变红色——图标跟随两者中更严重的那个
 ```
 
-CPU 和内存是两个独立着色的状态栏项,图标始终显示两者中更严重的等级——和 VS Code 自带的远程连接指示器同一套绿/橙/红配色语言。
+CPU 和内存是两个独立着色的状态栏项,图标始终显示两者中更严重的等级——和 VS Code 自带的远程连接指示器同一套绿/黄/红配色语言。
 
 点击这三个项中的任意一个——或运行「Remote Pulse: Show Trend Chart」命令——弹出 30 分钟 CPU/内存趋势的折线图,以及磁盘/网络/GPU/Docker 详情(Webview,关闭即销毁,不常驻内存)。面板顶部的齿轮图标可以直接打开本插件的设置。
 
@@ -40,7 +40,7 @@ CPU 和内存是两个独立着色的状态栏项,图标始终显示两者中更
 - **网络**:上行/下行速率(默认关闭,减少趋势面板噪音)
 - **GPU**:显存占用、利用率、温度(需要 `nvidia-smi`,不存在则模块整体不激活)
 - **Docker**:运行中容器数与各容器 CPU/内存占用(需要可访问 `/var/run/docker.sock`,无权限则静默降级)
-- **阈值告警**:CPU 和内存各自越过警告/严重阈值时独立变为橙色/红色,可选弹出系统通知(仅在"跨越"到严重态时通知一次,避免刷屏)
+- **阈值告警**:CPU 和内存各自越过警告/严重阈值时独立变为黄色/红色,可选弹出系统通知(仅在"跨越"到严重态时通知一次,避免刷屏)
 - **历史趋势**:最近 30 分钟的 Webview 折线图
 - **自适应轮询**:窗口失焦后自动降频,减少对远程机器的干扰
 - **界面本地化**:命令、设置项、状态栏/Webview 文案跟随 VS Code 显示语言自动切换(默认英文,内置简体中文翻译)
@@ -70,8 +70,9 @@ code --install-extension remote-pulse-0.1.0.vsix
 | `remotePulse.heavyMetricInterval` | `10000` | GPU/Docker 等低频指标独立轮询间隔(ms) |
 | `remotePulse.warningThreshold` | `80` | 告警阈值(%) |
 | `remotePulse.criticalThreshold` | `95` | 严重阈值(%) |
-| `remotePulse.template` | `"$(pulse) CPU ${cpu}%  MEM ${mem}%"` | 状态栏显示模板(`${cpu}` / `${mem}`) |
-| `remotePulse.enableGpu` | `true` | 是否探测并展示 GPU 信息 |
+| `remotePulse.template` | `"$(pulse) CPU ${cpu}%  MEM ${mem}%"` | 状态栏图标(只采用开头的 `$(图标)`——CPU/内存始终是两个独立着色的项) |
+| `remotePulse.statusBarMetrics` | `["cpu", "memory"]` | 状态栏要展示哪些指标(设置界面里是勾选框);未勾选的指标仍然能在趋势面板里看到 |
+| `remotePulse.enableGPU` | `true` | 是否探测并展示 GPU 信息 |
 | `remotePulse.enableDocker` | `true` | 是否探测并展示 Docker 容器信息 |
 | `remotePulse.enableNetwork` | `false` | 是否展示网络上下行速率 |
 | `remotePulse.enableNotifications` | `false` | 越过严重阈值时是否弹出系统通知 |
