@@ -11,7 +11,7 @@ import { Poller } from './scheduler';
 import { PulseStatusBar } from './statusBar';
 import { readConfig, isRemotePulseConfigChange, RemotePulseConfig } from './config';
 import { CollectionState, Snapshot } from './types';
-import { TrendPanel, TrendPayload } from './webview/trendPanel';
+import { HostInfo, TrendPanel, TrendPayload } from './webview/trendPanel';
 import { formatHostLabel } from './util/hostLabel';
 
 const TREND_WINDOW_MS = 30 * 60 * 1000;
@@ -34,6 +34,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
   const dockerCollector = new DockerCollector();
 
   const hostLabel = resolveHostLabel();
+  const host: HostInfo = { label: hostLabel, user: safeUserName() };
 
   let state: CollectionState = 'loading';
   let lastWasCritical = false;
@@ -57,7 +58,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     statusBar.update(snapshot, config, state);
     maybeNotifyCritical(snapshot);
     if (TrendPanel.isOpen()) {
-      TrendPanel.refreshIfOpen(hostLabel, buildTrendPayload(store, config));
+      TrendPanel.refreshIfOpen(host, buildTrendPayload(store, config));
     }
   }
 
@@ -132,7 +133,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
   });
 
   const showTrendCommand = vscode.commands.registerCommand('remotePulse.showTrend', () => {
-    TrendPanel.createOrShow(hostLabel, buildTrendPayload(store, config));
+    TrendPanel.createOrShow(host, buildTrendPayload(store, config));
   });
 
   const refreshCommand = vscode.commands.registerCommand('remotePulse.refresh', async () => {
@@ -166,6 +167,15 @@ function resolveHostLabel(): string {
     return formatHostLabel(hostname, ip, process.env.WSL_DISTRO_NAME);
   } catch {
     return vscode.l10n.t('Remote host');
+  }
+}
+
+/** 无 /etc/passwd 条目的容器里 os.userInfo() 会抛错;用户名只是身份标注,取不到就不显示。 */
+function safeUserName(): string | undefined {
+  try {
+    return os.userInfo().username || undefined;
+  } catch {
+    return undefined;
   }
 }
 

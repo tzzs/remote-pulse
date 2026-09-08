@@ -33,6 +33,12 @@ export interface TrendPayload {
   thresholds: { warning: number; critical: number };
 }
 
+/** 远程主机的身份信息。user 在受限环境下可能取不到,所以是可选的。 */
+export interface HostInfo {
+  label: string;
+  user?: string;
+}
+
 /**
  * 面板渲染模型:取值、单位换算、本地化全部在扩展侧完成,webview 只按模型建 DOM。
  * 这样 webview 里不出现任何字符串拼接的 HTML,主机名/挂载点/GPU 型号/容器名即使
@@ -56,7 +62,7 @@ type PanelGroup =
   | { kind: 'table'; title: string; badge?: string; columns: [string, string]; rows: [string, string, string][]; emptyHint?: string };
 
 interface PanelModel {
-  host: { name: string; meta: string };
+  host: { name: string; meta: string; user?: string };
   updated: string;
   groups: PanelGroup[];
   series: { cpu: number[]; memory: number[] };
@@ -77,29 +83,29 @@ export class TrendPanel {
   /** webview 被隐藏后会被销毁,再次显示时脚本重新加载并索要数据,这里留着最后一份。 */
   private lastModel: PanelModel | undefined;
 
-  static createOrShow(hostLabel: string, payload: TrendPayload): void {
+  static createOrShow(host: HostInfo, payload: TrendPayload): void {
     if (TrendPanel.current) {
       TrendPanel.current.panel.reveal();
-      TrendPanel.current.update(hostLabel, payload);
+      TrendPanel.current.update(host, payload);
       return;
     }
-    TrendPanel.current = new TrendPanel(hostLabel, payload);
+    TrendPanel.current = new TrendPanel(host, payload);
   }
 
   static isOpen(): boolean {
     return TrendPanel.current !== undefined;
   }
 
-  static refreshIfOpen(hostLabel: string, payload: TrendPayload): void {
-    TrendPanel.current?.update(hostLabel, payload);
+  static refreshIfOpen(host: HostInfo, payload: TrendPayload): void {
+    TrendPanel.current?.update(host, payload);
   }
 
-  private constructor(hostLabel: string, payload: TrendPayload) {
+  private constructor(host: HostInfo, payload: TrendPayload) {
     this.panel = vscode.window.createWebviewPanel('remotePulseTrend', vscode.l10n.t('Remote Pulse Trend'), vscode.ViewColumn.Beside, {
       enableScripts: true,
       retainContextWhenHidden: false,
     });
-    this.panel.title = `Remote Pulse — ${hostLabel}`;
+    this.panel.title = `Remote Pulse — ${host.label}`;
     this.panel.webview.html = this.renderShell();
     this.panel.webview.onDidReceiveMessage(
       message => {
@@ -111,12 +117,12 @@ export class TrendPanel {
       this.disposables,
     );
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
-    this.update(hostLabel, payload);
+    this.update(host, payload);
   }
 
-  private update(hostLabel: string, payload: TrendPayload): void {
-    this.panel.title = `Remote Pulse — ${hostLabel}`;
-    this.lastModel = buildModel(hostLabel, payload);
+  private update(host: HostInfo, payload: TrendPayload): void {
+    this.panel.title = `Remote Pulse — ${host.label}`;
+    this.lastModel = buildModel(host, payload);
     void this.panel.webview.postMessage({ type: 'model', model: this.lastModel });
   }
 
@@ -154,7 +160,7 @@ function splitHostLabel(hostLabel: string): { name: string; meta: string } {
   return match ? { name: match[1], meta: match[2] } : { name: hostLabel, meta: '' };
 }
 
-function buildModel(hostLabel: string, payload: TrendPayload): PanelModel {
+function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
   const { series, latest, thresholds } = payload;
   const levelOf = (percent: number): AlertLevel => calcAlertLevel(percent, thresholds.warning, thresholds.critical);
   const groups: PanelGroup[] = [];
@@ -263,7 +269,7 @@ function buildModel(hostLabel: string, payload: TrendPayload): PanelModel {
   const updatedAt = new Intl.DateTimeFormat(vscode.env.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date());
 
   return {
-    host: splitHostLabel(hostLabel),
+    host: { ...splitHostLabel(host.label), user: host.user },
     updated: vscode.l10n.t('Updated {0}', updatedAt),
     groups,
     series: { cpu: series.cpu, memory: series.memory },
@@ -293,33 +299,43 @@ const PANEL_CSS = `
     font-size: var(--vscode-font-size, 13px);
     line-height: 20px;
   }
-  .panel { padding: 14px 20px 24px; }
+  /* 超宽窗口里一行从最左标签跑到最右数值,眼睛要横扫整屏才能读完一条——
+     限宽居中是 VS Code 设置页同样的处理,读起来才不费劲。 */
+  .panel { padding: 16px 20px 28px; max-width: 980px; margin: 0 auto; }
 
-  .host { display: flex; align-items: flex-start; justify-content: space-between; gap: 2px 16px; flex-wrap: wrap;
-          padding-bottom: 12px; border-bottom: 1px solid var(--rp-hairline); }
-  .host-id { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
-  .host-name { font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 三级层级:主机名 15px 实心 > 区块标题 11px 大写加分隔线 > 行内容 13px。
+     区块标题靠"大写 + 满宽细线 + 上方留白"确立边界,而不是靠字号压过正文。 */
+  .host { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 16px; flex-wrap: wrap;
+          padding-bottom: 14px; border-bottom: 1px solid var(--rp-hairline); }
+  .host-id { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 1 auto; }
+  .host-icon { align-self: center; flex-shrink: 0; }
+  .host-name { font-size: 15px; font-weight: 600; line-height: 22px; min-width: 0;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .host-meta { font-size: 11px; line-height: 16px; color: var(--rp-muted); min-width: 0;
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .section { margin-top: 18px; }
-  .section-head { display: flex; align-items: center; gap: 8px; height: 22px; }
-  .section-title { font-size: 11px; font-weight: 600; line-height: 16px; letter-spacing: 0.04em;
-                   text-transform: uppercase; color: var(--rp-muted); }
+  .section { margin-top: 26px; }
+  .section-head { display: flex; align-items: center; gap: 8px; min-height: 20px;
+                  padding-bottom: 7px; border-bottom: 1px solid var(--rp-hairline); }
+  .section-title { font-size: 11px; font-weight: 700; line-height: 16px; letter-spacing: 0.09em;
+                   text-transform: uppercase; color: var(--vscode-foreground); }
   .badge { margin-left: auto; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 8px;
            background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-  .rows { display: flex; flex-direction: column; margin-top: 2px; }
+  .rows { display: flex; flex-direction: column; margin-top: 7px; }
 
   /* 一套栅格贯穿所有区块:标签 | 明细 | 进度条 | 数值。
-     1fr 的最小尺寸是 min-content,而明细是 nowrap 文本——不写 minmax(0, 1fr) 会在窄栏撑破容器。 */
-  .row { display: grid; grid-template-columns: 88px minmax(0, 1fr) 132px 44px; align-items: center; gap: 12px; height: 22px; }
-  .row.sub { grid-template-columns: 72px minmax(0, 1fr) 132px 44px; padding-left: 16px; }
-  .row.wide { grid-template-columns: 88px minmax(0, 1fr) auto; }
-  .row.sub.wide { grid-template-columns: 72px minmax(0, 1fr) auto; }
+     标签列用 fr 而不是固定 88px:挂载点路径(/usr/lib/wsl/drivers)在固定列里必然被截断,
+     而富余宽度全被明细列白白吃掉。fr 在各行之间解析结果一致,所以列仍然对齐。
+     minmax 的下限保证窄栏不塌,上限让标签优先拿到多出来的空间。 */
+  .row { display: grid; grid-template-columns: minmax(84px, 1.5fr) minmax(0, 1fr) minmax(132px, 0.8fr) 46px;
+         align-items: center; gap: 12px; height: 22px; }
+  .row.sub { grid-template-columns: minmax(68px, 1.5fr) minmax(0, 1fr) minmax(132px, 0.8fr) 46px; padding-left: 16px; }
+  .row.wide { grid-template-columns: minmax(84px, 1.5fr) minmax(0, 1fr) auto; }
+  .row.sub.wide { grid-template-columns: minmax(68px, 1.5fr) minmax(0, 1fr) auto; }
   .row-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row.sub .row-label { font-size: 11px; color: var(--rp-muted); }
   .row.strong .row-label { font-weight: 600; }
-  .row-detail { font-size: 11px; color: var(--rp-muted); min-width: 0;
+  .row-detail { font-size: 11px; color: var(--rp-muted); min-width: 0; text-align: right;
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .track { display: block; height: 4px; border-radius: 2px; background: var(--rp-track); overflow: hidden; }
@@ -329,7 +345,7 @@ const PANEL_CSS = `
   .warning .row-value { color: var(--rp-warning); }
   .critical .row-value { color: var(--rp-critical); }
 
-  .trow { display: grid; grid-template-columns: minmax(0, 1fr) 88px 88px; align-items: center; gap: 12px; height: 22px; }
+  .trow { display: grid; grid-template-columns: minmax(0, 1fr) 96px 96px; align-items: center; gap: 12px; height: 22px; }
   .trow.head { font-size: 11px; line-height: 16px; letter-spacing: 0.04em; text-transform: uppercase;
                color: var(--rp-muted); height: 20px; }
   .trow span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -350,7 +366,7 @@ const PANEL_CSS = `
   @media (max-width: 520px) {
     .panel { padding: 14px 12px 24px; }
     .row, .row.sub, .row.wide, .row.sub.wide {
-      display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) 44px;
+      display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) 46px;
       grid-template-areas: "label detail value" "bar bar bar";
       height: auto; padding: 1px 0 5px; gap: 2px 8px; align-items: baseline;
     }
@@ -383,6 +399,13 @@ const PANEL_SCRIPT = `
     return node;
   }
 
+  /** 挂载点、GPU 型号、容器名都可能被 ellipsis 截断——同步写 title,悬浮才看得到全名。 */
+  function setText(node, text) {
+    const value = text === undefined || text === null ? '' : String(text);
+    if (node.textContent !== value) node.textContent = value;
+    if (node.title !== value) node.title = value;
+  }
+
   function svg(tag, attrs) {
     const node = document.createElementNS(SVG_NS, tag);
     for (const key of Object.keys(attrs || {})) node.setAttribute(key, String(attrs[key]));
@@ -395,7 +418,7 @@ const PANEL_SCRIPT = `
       if (g.kind === 'metrics') return ['m', g.title, g.rows.map(function (r) { return [r.label, !!r.sub, !!r.strong, r.percent !== undefined]; })];
       if (g.kind === 'table') return ['t', g.title, g.rows.map(function (r) { return r[0]; })];
       return ['c', g.title];
-    })) + '|' + m.host.name + '|' + m.host.meta;
+    })) + '|' + m.host.name + '|' + m.host.meta + '|' + (m.host.user || '');
   }
 
   function build(m) {
@@ -406,14 +429,22 @@ const PANEL_SCRIPT = `
 
     const host = el('div', 'host');
     const id = el('div', 'host-id');
-    const icon = svg('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' });
+    const icon = svg('svg', { class: 'host-icon', width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' });
     icon.appendChild(svg('rect', { x: 2.5, y: 2.5, width: 11, height: 4.5, rx: 1, stroke: 'currentColor', 'stroke-width': 1.1 }));
     icon.appendChild(svg('rect', { x: 2.5, y: 9, width: 11, height: 4.5, rx: 1, stroke: 'currentColor', 'stroke-width': 1.1 }));
     icon.appendChild(svg('circle', { cx: 5, cy: 4.75, r: 0.9, fill: 'currentColor' }));
     icon.appendChild(svg('circle', { cx: 5, cy: 11.25, r: 0.9, fill: 'currentColor' }));
     id.appendChild(icon);
-    id.appendChild(el('span', 'host-name', m.host.name));
-    if (m.host.meta) id.appendChild(el('span', 'host-meta', m.host.meta));
+    // 远程主机的身份就是 user@host——和 ssh 里看到的一致,用户名不另起一行。
+    const title = m.host.user ? m.host.user + '@' + m.host.name : m.host.name;
+    const nameNode = el('span', 'host-name', title);
+    nameNode.title = title;
+    id.appendChild(nameNode);
+    if (m.host.meta) {
+      const meta = el('span', 'host-meta');
+      setText(meta, m.host.meta);
+      id.appendChild(meta);
+    }
     host.appendChild(id);
     const updated = el('div', 'host-meta', m.updated);
     host.appendChild(updated);
@@ -459,8 +490,11 @@ const PANEL_SCRIPT = `
           if (row.strong) className += ' strong';
           if (!hasBar) className += ' wide';
           const node = el('div', className);
-          node.appendChild(el('span', 'row-label', row.label));
-          const detail = el('span', 'row-detail', row.detail);
+          const label = el('span', 'row-label');
+          setText(label, row.label);
+          node.appendChild(label);
+          const detail = el('span', 'row-detail');
+          setText(detail, row.detail);
           node.appendChild(detail);
           let fill = null;
           if (hasBar) {
@@ -485,7 +519,8 @@ const PANEL_SCRIPT = `
         }
         for (const cells of group.rows) {
           const node = el('div', 'trow');
-          const name = el('span', '', cells[0]);
+          const name = el('span', '');
+          setText(name, cells[0]);
           const cpu = el('span', '', cells[1]);
           const mem = el('span', '', cells[2]);
           node.appendChild(name);
@@ -511,7 +546,7 @@ const PANEL_SCRIPT = `
       if (group.kind === 'metrics') {
         for (const row of group.rows) {
           const slot = slots[i++];
-          slot.detail.textContent = row.detail;
+          setText(slot.detail, row.detail);
           slot.value.textContent = row.value;
           slot.node.classList.toggle('warning', row.level === 'warning');
           slot.node.classList.toggle('critical', row.level === 'critical');
