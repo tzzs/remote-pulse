@@ -784,7 +784,11 @@ const PANEL_SCRIPT = `
       chartEl.appendChild(label);
     }
 
-    const span = width - gutter;
+    // 末端圆点的圆心如果落在 x = width(viewBox 的右边界)上,半径里有一半必然被 svg 视口裁掉——
+    // 之前就是这样,右侧留一点安全边距,圆点画在边界内侧而不是正好卡在边界上。
+    const endDotRadius = 2.5;
+    const rightPad = 5;
+    const span = width - gutter - rightPad;
     const maxPoints = Math.max(2, Math.floor(span / 3));
     const cpuVals = downsample(series.cpu, maxPoints);
     const memVals = downsample(series.memory, maxPoints);
@@ -804,7 +808,7 @@ const PANEL_SCRIPT = `
       chartEl.appendChild(svg('polyline', { class: className, points: points }));
       const last = Math.max(0, Math.min(100, values[values.length - 1]));
       chartEl.appendChild(svg('circle', {
-        cx: xs[xs.length - 1], cy: top + (1 - last / 100) * plotH, r: 2.5,
+        cx: xs[xs.length - 1], cy: top + (1 - last / 100) * plotH, r: endDotRadius,
         fill: className === 'cpu' ? 'var(--rp-cpu)' : 'var(--rp-mem)',
       }));
     }
