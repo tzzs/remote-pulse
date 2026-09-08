@@ -18,6 +18,7 @@
   "Not enough history data yet. Please wait a few seconds and reopen.": "暂无足够的历史数据,请稍候几秒再打开。",
   "Updated {0}": "更新于 {0}",
   "Utilization": "使用率",
-  "Docker containers": "Docker 容器",
+  "System": "系统",
+  "Storage": "存储",
   "No containers running": "当前没有运行中的容器"
 }

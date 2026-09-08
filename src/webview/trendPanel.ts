@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { AlertLevel, CpuStats, DiskStats, DockerContainerStats, DockerStats, GpuStats, MemoryStats, NetworkRate } from '../types';
+import { AlertLevel, CpuStats, DiskStats, DockerStats, GpuStats, MemoryStats, NetworkRate } from '../types';
 import { calcAlertLevel } from '../store/statsStore';
 import { formatBytes, formatRate, formatUptime } from '../util/sparkline';
 
@@ -12,15 +12,7 @@ function nonce(): string {
   return text;
 }
 
-const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-
-/** 系统命令输出(GPU 型号、容器名、挂载点)理论上可包含任意字符,插入 HTML 前一律转义。 */
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
-}
-
 export interface TrendSeries {
-  timestamps: number[];
   cpu: number[];
   memory: number[];
 }
@@ -42,14 +34,48 @@ export interface TrendPayload {
 }
 
 /**
+ * 面板渲染模型:取值、单位换算、本地化全部在扩展侧完成,webview 只按模型建 DOM。
+ * 这样 webview 里不出现任何字符串拼接的 HTML,主机名/挂载点/GPU 型号/容器名即使
+ * 含尖括号也只会作为 textContent 出现,天然没有注入面。
+ */
+interface MetricRow {
+  label: string;
+  detail: string;
+  value: string;
+  /** 有百分比才画进度条;温度、速率这类没有 0-100 语义的指标不画。 */
+  percent?: number;
+  level: AlertLevel;
+  /** 子行(GPU 各项指标):缩进 16px 并收窄标签列,让进度条与数值仍落在同一条右边线上。 */
+  sub?: boolean;
+  strong?: boolean;
+}
+
+type PanelGroup =
+  | { kind: 'metrics'; title: string; badge?: string; rows: MetricRow[] }
+  | { kind: 'chart'; title: string; legend: [string, string]; emptyHint: string }
+  | { kind: 'table'; title: string; badge?: string; columns: [string, string]; rows: [string, string, string][]; emptyHint?: string };
+
+interface PanelModel {
+  host: { name: string; meta: string };
+  updated: string;
+  groups: PanelGroup[];
+  series: { cpu: number[]; memory: number[] };
+}
+
+/**
  * 趋势面板按需创建、按需销毁,不常驻内存(retainContextWhenHidden: false)。
- * 关闭后再次打开会重新创建并注入最新历史数据,不留痕迹。
+ *
+ * 外壳 HTML 只在创建时写一次,之后每轮采集用 postMessage 推数据、由 webview 就地改 DOM。
+ * 早先的实现每次刷新都重设 webview.html,等价于整页重载——2 秒一次的闪烁、滚动位置
+ * 和文字选中都会被清掉,面板越长越明显。
  */
 export class TrendPanel {
   private static current: TrendPanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
+  /** webview 被隐藏后会被销毁,再次显示时脚本重新加载并索要数据,这里留着最后一份。 */
+  private lastModel: PanelModel | undefined;
 
   static createOrShow(hostLabel: string, payload: TrendPayload): void {
     if (TrendPanel.current) {
@@ -73,22 +99,30 @@ export class TrendPanel {
       enableScripts: true,
       retainContextWhenHidden: false,
     });
+    this.panel.title = `Remote Pulse — ${hostLabel}`;
+    this.panel.webview.html = this.renderShell();
+    this.panel.webview.onDidReceiveMessage(
+      message => {
+        if (message?.type === 'ready' && this.lastModel) {
+          void this.panel.webview.postMessage({ type: 'model', model: this.lastModel });
+        }
+      },
+      null,
+      this.disposables,
+    );
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
     this.update(hostLabel, payload);
   }
 
   private update(hostLabel: string, payload: TrendPayload): void {
     this.panel.title = `Remote Pulse — ${hostLabel}`;
-    this.panel.webview.html = this.renderHtml(hostLabel, payload);
+    this.lastModel = buildModel(hostLabel, payload);
+    void this.panel.webview.postMessage({ type: 'model', model: this.lastModel });
   }
 
-  private renderHtml(hostLabel: string, payload: TrendPayload): string {
+  private renderShell(): string {
     const csp = this.panel.webview.cspSource;
     const n = nonce();
-    const { series, latest, thresholds } = payload;
-    const dataJson = JSON.stringify(series).replace(/</g, '\\u003c');
-    const hostLabelSafe = escapeHtml(hostLabel);
-    const updatedAt = new Intl.DateTimeFormat(vscode.env.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date());
 
     return `<!DOCTYPE html>
 <html lang="${vscode.env.language}">
@@ -96,293 +130,13 @@ export class TrendPanel {
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src 'nonce-${n}';" />
   <title>${vscode.l10n.t('Remote Pulse Trend')}</title>
-  <style>${this.css()}</style>
+  <style>${PANEL_CSS}</style>
 </head>
 <body>
-  <header class="page-header">
-    <h1>${hostLabelSafe}</h1>
-    <div class="updated">${vscode.l10n.t('Updated {0}', updatedAt)}</div>
-  </header>
-
-  ${latest ? this.renderBody(series, latest, thresholds) : this.renderEmpty()}
-
-  <script nonce="${n}">
-    const series = ${dataJson};
-    const canvas = document.getElementById('chart');
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      const style = getComputedStyle(document.body);
-      const cpuColor = style.getPropertyValue('--cpu-color').trim() || '#3794ff';
-      const memColor = style.getPropertyValue('--mem-color').trim() || '#f5a623';
-      const gridColor = style.getPropertyValue('--grid-color').trim() || 'rgba(128,128,128,0.25)';
-
-      function plot(values, color) {
-        if (values.length < 2) return;
-        const w = canvas.clientWidth;
-        const h = canvas.clientHeight;
-        ctx.beginPath();
-        values.forEach((v, i) => {
-          const x = (w * i) / (values.length - 1);
-          const y = h - (Math.min(100, Math.max(0, v)) / 100) * h;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.lineJoin = 'round';
-        ctx.stroke();
-        const lastV = values[values.length - 1];
-        const lastY = h - (Math.min(100, Math.max(0, lastV)) / 100) * h;
-        ctx.beginPath();
-        ctx.arc(w, lastY, 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-      }
-
-      function draw() {
-        const dpr = window.devicePixelRatio || 1;
-        const w = canvas.clientWidth;
-        const h = canvas.clientHeight;
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.clearRect(0, 0, w, h);
-
-        ctx.strokeStyle = gridColor;
-        ctx.lineWidth = 1;
-        for (let i = 0; i <= 4; i++) {
-          const y = (h / 4) * i;
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(w, y);
-          ctx.stroke();
-        }
-
-        plot(series.cpu, cpuColor);
-        plot(series.memory, memColor);
-      }
-
-      draw();
-      window.addEventListener('resize', draw);
-    }
-  </script>
+  <div id="root" class="panel"></div>
+  <script nonce="${n}">${PANEL_SCRIPT}</script>
 </body>
 </html>`;
-  }
-
-  private renderEmpty(): string {
-    return `<p class="empty-note">${vscode.l10n.t('Not enough history data yet. Please wait a few seconds and reopen.')}</p>`;
-  }
-
-  private renderBody(series: TrendSeries, latest: TrendLatest, thresholds: { warning: number; critical: number }): string {
-    return [
-      this.renderStatGrid(latest, thresholds),
-      this.renderChartCard(series),
-      this.renderGpuSection(latest.gpus, thresholds),
-      this.renderDockerSection(latest.docker),
-    ]
-      .filter(Boolean)
-      .join('\n');
-  }
-
-  private renderStatGrid(latest: TrendLatest, thresholds: { warning: number; critical: number }): string {
-    const cards: string[] = [];
-
-    if (latest.cpu) {
-      const level = calcAlertLevel(latest.cpu.percent, thresholds.warning, thresholds.critical);
-      cards.push(this.statCard('CPU', `${Math.round(latest.cpu.percent)}%`, vscode.l10n.t('{0} cores', latest.cpu.cores), latest.cpu.percent, level));
-    }
-    if (latest.memory) {
-      const level = calcAlertLevel(latest.memory.percent, thresholds.warning, thresholds.critical);
-      cards.push(
-        this.statCard(
-          vscode.l10n.t('Memory'),
-          `${Math.round(latest.memory.percent)}%`,
-          `${formatBytes(latest.memory.used)} / ${formatBytes(latest.memory.total)}`,
-          latest.memory.percent,
-          level,
-        ),
-      );
-    }
-    for (const disk of latest.disks) {
-      const level = calcAlertLevel(disk.percent, thresholds.warning, thresholds.critical);
-      cards.push(
-        this.statCard(
-          escapeHtml(disk.mountPoint),
-          `${Math.round(disk.percent)}%`,
-          `${formatBytes(disk.used)} / ${formatBytes(disk.total)}`,
-          disk.percent,
-          level,
-        ),
-      );
-    }
-    if (latest.network) {
-      cards.push(
-        this.statCard(vscode.l10n.t('Network'), `↓ ${formatRate(latest.network.rxRate)}`, `↑ ${formatRate(latest.network.txRate)}`, undefined, 'normal'),
-      );
-    }
-    if (latest.uptimeSeconds !== undefined) {
-      cards.push(this.statCard(vscode.l10n.t('Uptime'), formatUptime(latest.uptimeSeconds), '', undefined, 'normal'));
-    }
-
-    return cards.length ? `<section class="stat-grid">${cards.join('')}</section>` : '';
-  }
-
-  private statCard(label: string, value: string, sub: string, percent: number | undefined, level: AlertLevel): string {
-    const bar = percent !== undefined ? `<div class="stat-bar"><div class="stat-bar-fill" style="width:${Math.min(100, Math.max(0, percent))}%"></div></div>` : '';
-    return `<div class="stat-card level-${level}">
-      <div class="stat-label" title="${label}">${label}</div>
-      <div class="stat-value">${value}</div>
-      ${sub ? `<div class="stat-sub">${sub}</div>` : ''}
-      ${bar}
-    </div>`;
-  }
-
-  private renderChartCard(series: TrendSeries): string {
-    const hasData = series.cpu.length > 0 || series.memory.length > 0;
-    return `<section class="chart-card">
-      <div class="chart-header">
-        <h2 class="section-title">${vscode.l10n.t('past 30 minutes')}</h2>
-        <div class="legend">
-          <span><i class="dot" style="background:var(--cpu-color)"></i>CPU</span>
-          <span><i class="dot" style="background:var(--mem-color)"></i>${vscode.l10n.t('Memory')}</span>
-        </div>
-      </div>
-      ${
-        hasData
-          ? `<div class="chart-body">
-        <div class="y-axis"><span>100%</span><span>50%</span><span>0%</span></div>
-        <canvas id="chart"></canvas>
-      </div>`
-          : `<p class="empty-note">${vscode.l10n.t('Not enough history data yet. Please wait a few seconds and reopen.')}</p>`
-      }
-    </section>`;
-  }
-
-  private renderGpuSection(gpus: GpuStats[], thresholds: { warning: number; critical: number }): string {
-    if (!gpus.length) {
-      return '';
-    }
-    const cards = gpus
-      .map(gpu => {
-        const utilLevel = calcAlertLevel(gpu.utilizationPercent, thresholds.warning, thresholds.critical);
-        const vramPercent = gpu.memoryTotalMb > 0 ? (gpu.memoryUsedMb / gpu.memoryTotalMb) * 100 : 0;
-        const vramLevel = calcAlertLevel(vramPercent, thresholds.warning, thresholds.critical);
-        const tempLevel = calcAlertLevel(gpu.temperatureC, thresholds.warning, thresholds.critical);
-        const title = `GPU #${gpu.index}${gpu.name ? ` · ${escapeHtml(gpu.name)}` : ''}`;
-        return `<div class="gpu-card">
-          <div class="gpu-card-header">${title}</div>
-          ${this.metricRow(vscode.l10n.t('Utilization'), gpu.utilizationPercent, `${Math.round(gpu.utilizationPercent)}%`, utilLevel)}
-          ${this.metricRow(vscode.l10n.t('VRAM'), vramPercent, `${gpu.memoryUsedMb}/${gpu.memoryTotalMb} MB`, vramLevel)}
-          ${this.metricRow(vscode.l10n.t('Temp'), undefined, `${gpu.temperatureC}°C`, tempLevel)}
-        </div>`;
-      })
-      .join('');
-    return `<section>
-      <h2 class="section-title">GPU</h2>
-      <div class="gpu-grid">${cards}</div>
-    </section>`;
-  }
-
-  private metricRow(label: string, percent: number | undefined, value: string, level: AlertLevel): string {
-    const bar = percent !== undefined ? `<div class="metric-bar"><div class="metric-bar-fill level-${level}" style="width:${Math.min(100, Math.max(0, percent))}%"></div></div>` : '<div class="metric-bar"></div>';
-    return `<div class="metric-row">
-      <span class="metric-label">${label}</span>
-      ${bar}
-      <span class="metric-value level-${level}">${value}</span>
-    </div>`;
-  }
-
-  private renderDockerSection(docker: DockerStats | undefined): string {
-    if (!docker) {
-      return '';
-    }
-    const summary = `<p class="section-sub">${vscode.l10n.t('Running containers: {0}', docker.containerCount)}</p>`;
-    const body = docker.containers.length
-      ? `<table class="docker-table">
-          <thead><tr><th></th><th>CPU</th><th>${vscode.l10n.t('Memory')}</th></tr></thead>
-          <tbody>${docker.containers.map(c => this.dockerRow(c)).join('')}</tbody>
-        </table>`
-      : `<p class="empty-note">${vscode.l10n.t('No containers running')}</p>`;
-    return `<section>
-      <h2 class="section-title">${vscode.l10n.t('Docker containers')}</h2>
-      ${summary}
-      ${body}
-    </section>`;
-  }
-
-  private dockerRow(c: DockerContainerStats): string {
-    return `<tr><td>${escapeHtml(c.name)}</td><td>${c.cpuPercent.toFixed(1)}%</td><td>${formatBytes(c.memoryUsedBytes)}</td></tr>`;
-  }
-
-  private css(): string {
-    return `
-    * { box-sizing: border-box; }
-    :root {
-      --cpu-color: var(--vscode-charts-blue, #3794ff);
-      --mem-color: var(--vscode-charts-orange, #f5a623);
-      --grid-color: rgba(128, 128, 128, 0.25);
-      --card-border: var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
-      --card-bg: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.06));
-      --level-normal: var(--vscode-charts-green, #89d185);
-      --level-warning: var(--vscode-charts-yellow, #cca700);
-      --level-critical: var(--vscode-charts-red, #f14c4c);
-    }
-    body {
-      font-family: var(--vscode-font-family);
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-      margin: 0;
-      padding: 16px 20px 24px;
-    }
-    .page-header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px; margin-bottom: 14px; }
-    h1 { font-size: 15px; font-weight: 600; margin: 0; }
-    .updated { font-size: 11px; color: var(--vscode-descriptionForeground); }
-    .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--vscode-descriptionForeground); margin: 20px 0 8px; }
-    section:first-of-type .section-title { margin-top: 0; }
-
-    .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-    .stat-card { border: 1px solid var(--card-border); border-radius: 6px; background: var(--card-bg); padding: 10px 12px; min-width: 0; }
-    .stat-label { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
-    .stat-value { font-size: 20px; font-weight: 600; line-height: 1.2; }
-    .stat-card.level-warning .stat-value { color: var(--level-warning); }
-    .stat-card.level-critical .stat-value { color: var(--level-critical); }
-    .stat-sub { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 2px; }
-    .stat-bar { height: 4px; border-radius: 2px; background: rgba(128, 128, 128, 0.2); margin-top: 8px; overflow: hidden; }
-    .stat-bar-fill { height: 100%; border-radius: 2px; background: var(--level-normal); }
-    .stat-card.level-warning .stat-bar-fill { background: var(--level-warning); }
-    .stat-card.level-critical .stat-bar-fill { background: var(--level-critical); }
-
-    .chart-card { border: 1px solid var(--card-border); border-radius: 6px; background: var(--card-bg); padding: 14px 16px; }
-    .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-    .chart-header .section-title { margin: 0; }
-    .legend { display: flex; gap: 14px; font-size: 11px; color: var(--vscode-descriptionForeground); }
-    .legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
-    .chart-body { display: flex; gap: 8px; }
-    .y-axis { display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: var(--vscode-descriptionForeground); padding: 2px 0; }
-    canvas#chart { flex: 1; width: 100%; height: 200px; }
-
-    .gpu-grid { display: flex; flex-direction: column; gap: 8px; }
-    .gpu-card { border: 1px solid var(--card-border); border-radius: 6px; background: var(--card-bg); padding: 10px 12px; }
-    .gpu-card-header { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
-    .metric-row { display: flex; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 6px; }
-    .metric-row:last-child { margin-bottom: 0; }
-    .metric-label { width: 56px; flex-shrink: 0; color: var(--vscode-descriptionForeground); }
-    .metric-bar { flex: 1; height: 4px; border-radius: 2px; background: rgba(128, 128, 128, 0.2); overflow: hidden; }
-    .metric-bar-fill { height: 100%; background: var(--level-normal); }
-    .metric-bar-fill.level-warning { background: var(--level-warning); }
-    .metric-bar-fill.level-critical { background: var(--level-critical); }
-    .metric-value { flex-shrink: 0; text-align: right; min-width: 64px; }
-    .metric-value.level-warning { color: var(--level-warning); }
-    .metric-value.level-critical { color: var(--level-critical); }
-
-    table.docker-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    table.docker-table th { text-align: left; font-weight: 500; font-size: 11px; color: var(--vscode-descriptionForeground); padding: 4px 8px; border-bottom: 1px solid var(--card-border); }
-    table.docker-table td { padding: 5px 8px; border-bottom: 1px solid rgba(128, 128, 128, 0.12); }
-    table.docker-table td:not(:first-child), table.docker-table th:not(:first-child) { text-align: right; white-space: nowrap; }
-
-    .empty-note, .section-sub { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 0 0 8px; }
-    `;
   }
 
   private dispose(): void {
@@ -393,3 +147,472 @@ export class TrendPanel {
     }
   }
 }
+
+/** "host [WSL:distro] (10.0.0.2)" → 主名 + 弱化的 IP,IP 缺失时整串当主名。 */
+function splitHostLabel(hostLabel: string): { name: string; meta: string } {
+  const match = /^(.*?)\s*\(([^()]*)\)$/.exec(hostLabel);
+  return match ? { name: match[1], meta: match[2] } : { name: hostLabel, meta: '' };
+}
+
+function buildModel(hostLabel: string, payload: TrendPayload): PanelModel {
+  const { series, latest, thresholds } = payload;
+  const levelOf = (percent: number): AlertLevel => calcAlertLevel(percent, thresholds.warning, thresholds.critical);
+  const groups: PanelGroup[] = [];
+
+  const system: MetricRow[] = [];
+  if (latest?.cpu) {
+    system.push({
+      label: 'CPU',
+      detail: vscode.l10n.t('{0} cores', latest.cpu.cores),
+      value: `${Math.round(latest.cpu.percent)}%`,
+      percent: latest.cpu.percent,
+      level: levelOf(latest.cpu.percent),
+    });
+  }
+  if (latest?.memory) {
+    system.push({
+      label: vscode.l10n.t('Memory'),
+      detail: `${formatBytes(latest.memory.used)} / ${formatBytes(latest.memory.total)}`,
+      value: `${Math.round(latest.memory.percent)}%`,
+      percent: latest.memory.percent,
+      level: levelOf(latest.memory.percent),
+    });
+  }
+  if (latest?.network) {
+    system.push({
+      label: vscode.l10n.t('Network'),
+      detail: '',
+      // HTML 会把连续空格折叠成一个,用 em space 才能保住上下行速率之间的视觉间隔。
+      value: `↓ ${formatRate(latest.network.rxRate)}  ↑ ${formatRate(latest.network.txRate)}`,
+      level: 'normal',
+    });
+  }
+  if (latest?.uptimeSeconds !== undefined) {
+    system.push({ label: vscode.l10n.t('Uptime'), detail: '', value: formatUptime(latest.uptimeSeconds), level: 'normal' });
+  }
+  if (system.length) {
+    groups.push({ kind: 'metrics', title: vscode.l10n.t('System'), rows: system });
+  }
+
+  groups.push({
+    kind: 'chart',
+    title: vscode.l10n.t('past 30 minutes'),
+    legend: ['CPU', vscode.l10n.t('Memory')],
+    emptyHint: vscode.l10n.t('Not enough history data yet. Please wait a few seconds and reopen.'),
+  });
+
+  const disks = latest?.disks ?? [];
+  if (disks.length) {
+    groups.push({
+      kind: 'metrics',
+      title: vscode.l10n.t('Storage'),
+      rows: disks.map(disk => ({
+        label: disk.mountPoint,
+        detail: `${formatBytes(disk.used)} / ${formatBytes(disk.total)}`,
+        value: `${Math.round(disk.percent)}%`,
+        percent: disk.percent,
+        level: levelOf(disk.percent),
+      })),
+    });
+  }
+
+  const gpus = latest?.gpus ?? [];
+  if (gpus.length) {
+    const rows: MetricRow[] = [];
+    for (const gpu of gpus) {
+      const vramPercent = gpu.memoryTotalMb > 0 ? (gpu.memoryUsedMb / gpu.memoryTotalMb) * 100 : 0;
+      rows.push({ label: `GPU ${gpu.index}`, detail: gpu.name ?? '', value: '', level: 'normal', strong: true });
+      rows.push({
+        label: vscode.l10n.t('Utilization'),
+        detail: '',
+        value: `${Math.round(gpu.utilizationPercent)}%`,
+        percent: gpu.utilizationPercent,
+        level: levelOf(gpu.utilizationPercent),
+        sub: true,
+      });
+      rows.push({
+        label: vscode.l10n.t('VRAM'),
+        detail: `${formatBytes(gpu.memoryUsedMb * 1024 * 1024)} / ${formatBytes(gpu.memoryTotalMb * 1024 * 1024)}`,
+        value: `${Math.round(vramPercent)}%`,
+        percent: vramPercent,
+        level: levelOf(vramPercent),
+        sub: true,
+      });
+      rows.push({
+        label: vscode.l10n.t('Temp'),
+        detail: '',
+        value: `${gpu.temperatureC} °C`,
+        level: levelOf(gpu.temperatureC),
+        sub: true,
+      });
+    }
+    groups.push({ kind: 'metrics', title: 'GPU', rows });
+  }
+
+  if (latest?.docker) {
+    groups.push({
+      kind: 'table',
+      title: 'Docker',
+      badge: String(latest.docker.containerCount),
+      columns: ['CPU', vscode.l10n.t('Memory')],
+      rows: latest.docker.containers.map(c => [c.name, `${c.cpuPercent.toFixed(1)}%`, formatBytes(c.memoryUsedBytes)] as [string, string, string]),
+      emptyHint: vscode.l10n.t('No containers running'),
+    });
+  }
+
+  const updatedAt = new Intl.DateTimeFormat(vscode.env.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date());
+
+  return {
+    host: splitHostLabel(hostLabel),
+    updated: vscode.l10n.t('Updated {0}', updatedAt),
+    groups,
+    series: { cpu: series.cpu, memory: series.memory },
+  };
+}
+
+/**
+ * 全部取值来自 --vscode-* 主题变量,面板因此跟随用户当前主题(含浅色/高对比度)。
+ * 正常态刻意不上色——灰色是 VS Code 里"静止"的语言,颜色只用来表示越过阈值。
+ */
+const PANEL_CSS = `
+  * { box-sizing: border-box; }
+  :root {
+    --rp-muted: var(--vscode-descriptionForeground);
+    --rp-hairline: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+    --rp-track: rgba(128, 128, 128, 0.25);
+    --rp-warning: var(--vscode-editorWarning-foreground, #cca700);
+    --rp-critical: var(--vscode-editorError-foreground, #f14c4c);
+    --rp-cpu: var(--vscode-charts-blue, #3794ff);
+    --rp-mem: var(--vscode-charts-purple, #b180d7);
+  }
+  body {
+    margin: 0;
+    background: var(--vscode-editor-background);
+    color: var(--vscode-foreground);
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size, 13px);
+    line-height: 20px;
+  }
+  .panel { padding: 14px 20px 24px; }
+
+  .host { display: flex; align-items: flex-start; justify-content: space-between; gap: 2px 16px; flex-wrap: wrap;
+          padding-bottom: 12px; border-bottom: 1px solid var(--rp-hairline); }
+  .host-id { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
+  .host-name { font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .host-meta { font-size: 11px; line-height: 16px; color: var(--rp-muted); min-width: 0;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .section { margin-top: 18px; }
+  .section-head { display: flex; align-items: center; gap: 8px; height: 22px; }
+  .section-title { font-size: 11px; font-weight: 600; line-height: 16px; letter-spacing: 0.04em;
+                   text-transform: uppercase; color: var(--rp-muted); }
+  .badge { margin-left: auto; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 8px;
+           background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+  .rows { display: flex; flex-direction: column; margin-top: 2px; }
+
+  /* 一套栅格贯穿所有区块:标签 | 明细 | 进度条 | 数值。
+     1fr 的最小尺寸是 min-content,而明细是 nowrap 文本——不写 minmax(0, 1fr) 会在窄栏撑破容器。 */
+  .row { display: grid; grid-template-columns: 88px minmax(0, 1fr) 132px 44px; align-items: center; gap: 12px; height: 22px; }
+  .row.sub { grid-template-columns: 72px minmax(0, 1fr) 132px 44px; padding-left: 16px; }
+  .row.wide { grid-template-columns: 88px minmax(0, 1fr) auto; }
+  .row.sub.wide { grid-template-columns: 72px minmax(0, 1fr) auto; }
+  .row-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.sub .row-label { font-size: 11px; color: var(--rp-muted); }
+  .row.strong .row-label { font-weight: 600; }
+  .row-detail { font-size: 11px; color: var(--rp-muted); min-width: 0;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .track { display: block; height: 4px; border-radius: 2px; background: var(--rp-track); overflow: hidden; }
+  .fill { display: block; height: 100%; border-radius: 2px; background: var(--vscode-foreground); opacity: 0.5; }
+  .warning .fill { background: var(--rp-warning); opacity: 1; }
+  .critical .fill { background: var(--rp-critical); opacity: 1; }
+  .warning .row-value { color: var(--rp-warning); }
+  .critical .row-value { color: var(--rp-critical); }
+
+  .trow { display: grid; grid-template-columns: minmax(0, 1fr) 88px 88px; align-items: center; gap: 12px; height: 22px; }
+  .trow.head { font-size: 11px; line-height: 16px; letter-spacing: 0.04em; text-transform: uppercase;
+               color: var(--rp-muted); height: 20px; }
+  .trow span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .trow span:first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .legend { display: flex; align-items: center; gap: 12px; margin-left: auto;
+            font-size: 11px; line-height: 16px; color: var(--rp-muted); }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .swatch { width: 8px; height: 2px; border-radius: 1px; }
+  .chart { display: block; width: 100%; margin-top: 4px; }
+  .chart .grid { stroke: var(--rp-hairline); stroke-width: 1; }
+  .chart .axis { fill: var(--rp-muted); font-size: 11px; }
+  .chart .cpu { fill: none; stroke: var(--rp-cpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .mem { fill: none; stroke: var(--rp-mem); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .hint { font-size: 11px; line-height: 16px; color: var(--rp-muted); margin: 6px 0 0; }
+
+  /* 面板常以 ViewColumn.Beside 打开,窄栏是常态:进度条改占整行,信息一条不丢。 */
+  @media (max-width: 520px) {
+    .panel { padding: 14px 12px 24px; }
+    .row, .row.sub, .row.wide, .row.sub.wide {
+      display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) 44px;
+      grid-template-areas: "label detail value" "bar bar bar";
+      height: auto; padding: 1px 0 5px; gap: 2px 8px; align-items: baseline;
+    }
+    /* 无进度条的行(网络速率、运行时长、温度)数值本身就长,不能挤进 44px 的数值列。 */
+    .row.wide, .row.sub.wide { grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; }
+    .row.sub { padding-left: 12px; }
+    .row-label { grid-area: label; }
+    .row-detail { grid-area: detail; text-align: right; }
+    .row-value { grid-area: value; }
+    .track { grid-area: bar; margin-top: 2px; }
+    .trow { grid-template-columns: minmax(0, 1fr) 60px 72px; gap: 8px; }
+  }
+`;
+
+const PANEL_SCRIPT = `
+  const vscode = acquireVsCodeApi();
+  const root = document.getElementById('root');
+  let model = null;
+  let shapeKey = '';
+  let slots = [];
+  let chartEl = null;
+  let chartHint = null;
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function svg(tag, attrs) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const key of Object.keys(attrs || {})) node.setAttribute(key, String(attrs[key]));
+    return node;
+  }
+
+  /** 结构不变就只改文字和条宽,避免每 2 秒重建 DOM 打断用户的文字选中。 */
+  function shapeOf(m) {
+    return JSON.stringify(m.groups.map(function (g) {
+      if (g.kind === 'metrics') return ['m', g.title, g.rows.map(function (r) { return [r.label, !!r.sub, !!r.strong, r.percent !== undefined]; })];
+      if (g.kind === 'table') return ['t', g.title, g.rows.map(function (r) { return r[0]; })];
+      return ['c', g.title];
+    })) + '|' + m.host.name + '|' + m.host.meta;
+  }
+
+  function build(m) {
+    slots = [];
+    chartEl = null;
+    chartHint = null;
+    const frag = document.createDocumentFragment();
+
+    const host = el('div', 'host');
+    const id = el('div', 'host-id');
+    const icon = svg('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' });
+    icon.appendChild(svg('rect', { x: 2.5, y: 2.5, width: 11, height: 4.5, rx: 1, stroke: 'currentColor', 'stroke-width': 1.1 }));
+    icon.appendChild(svg('rect', { x: 2.5, y: 9, width: 11, height: 4.5, rx: 1, stroke: 'currentColor', 'stroke-width': 1.1 }));
+    icon.appendChild(svg('circle', { cx: 5, cy: 4.75, r: 0.9, fill: 'currentColor' }));
+    icon.appendChild(svg('circle', { cx: 5, cy: 11.25, r: 0.9, fill: 'currentColor' }));
+    id.appendChild(icon);
+    id.appendChild(el('span', 'host-name', m.host.name));
+    if (m.host.meta) id.appendChild(el('span', 'host-meta', m.host.meta));
+    host.appendChild(id);
+    const updated = el('div', 'host-meta', m.updated);
+    host.appendChild(updated);
+    slots.push({ kind: 'updated', node: updated });
+    frag.appendChild(host);
+
+    for (const group of m.groups) {
+      const section = el('div', 'section');
+      const head = el('div', 'section-head');
+      head.appendChild(el('span', 'section-title', group.title));
+
+      if (group.kind === 'chart') {
+        const legend = el('span', 'legend');
+        const names = group.legend;
+        for (let i = 0; i < names.length; i++) {
+          const item = el('span', 'legend-item');
+          const dot = el('span', 'swatch');
+          dot.style.background = i === 0 ? 'var(--rp-cpu)' : 'var(--rp-mem)';
+          item.appendChild(dot);
+          item.appendChild(document.createTextNode(names[i]));
+          legend.appendChild(item);
+        }
+        head.appendChild(legend);
+        section.appendChild(head);
+        chartEl = svg('svg', { class: 'chart', preserveAspectRatio: 'none' });
+        section.appendChild(chartEl);
+        chartHint = el('p', 'hint', group.emptyHint);
+        chartHint.hidden = true;
+        section.appendChild(chartHint);
+        frag.appendChild(section);
+        continue;
+      }
+
+      if (group.badge !== undefined) head.appendChild(el('span', 'badge', group.badge));
+      section.appendChild(head);
+      const rows = el('div', 'rows');
+
+      if (group.kind === 'metrics') {
+        for (const row of group.rows) {
+          const hasBar = row.percent !== undefined;
+          let className = 'row';
+          if (row.sub) className += ' sub';
+          if (row.strong) className += ' strong';
+          if (!hasBar) className += ' wide';
+          const node = el('div', className);
+          node.appendChild(el('span', 'row-label', row.label));
+          const detail = el('span', 'row-detail', row.detail);
+          node.appendChild(detail);
+          let fill = null;
+          if (hasBar) {
+            const track = el('span', 'track');
+            fill = el('span', 'fill');
+            track.appendChild(fill);
+            node.appendChild(track);
+          }
+          const value = el('span', 'row-value', row.value);
+          node.appendChild(value);
+          rows.appendChild(node);
+          slots.push({ kind: 'row', node: node, detail: detail, value: value, fill: fill });
+        }
+      } else {
+        const head2 = el('div', 'trow head');
+        head2.appendChild(el('span', '', ''));
+        head2.appendChild(el('span', '', group.columns[0]));
+        head2.appendChild(el('span', '', group.columns[1]));
+        rows.appendChild(head2);
+        if (!group.rows.length && group.emptyHint) {
+          rows.appendChild(el('p', 'hint', group.emptyHint));
+        }
+        for (const cells of group.rows) {
+          const node = el('div', 'trow');
+          const name = el('span', '', cells[0]);
+          const cpu = el('span', '', cells[1]);
+          const mem = el('span', '', cells[2]);
+          node.appendChild(name);
+          node.appendChild(cpu);
+          node.appendChild(mem);
+          rows.appendChild(node);
+          slots.push({ kind: 'cells', cpu: cpu, mem: mem });
+        }
+      }
+
+      section.appendChild(rows);
+      frag.appendChild(section);
+    }
+
+    root.replaceChildren(frag);
+  }
+
+  function apply(m) {
+    let i = 0;
+    slots[i++].node.textContent = m.updated;
+    for (const group of m.groups) {
+      if (group.kind === 'chart') continue;
+      if (group.kind === 'metrics') {
+        for (const row of group.rows) {
+          const slot = slots[i++];
+          slot.detail.textContent = row.detail;
+          slot.value.textContent = row.value;
+          slot.node.classList.toggle('warning', row.level === 'warning');
+          slot.node.classList.toggle('critical', row.level === 'critical');
+          if (slot.fill) slot.fill.style.width = Math.max(0, Math.min(100, row.percent)) + '%';
+        }
+      } else {
+        for (const cells of group.rows) {
+          const slot = slots[i++];
+          slot.cpu.textContent = cells[1];
+          slot.mem.textContent = cells[2];
+        }
+      }
+    }
+    drawChart(m.series);
+  }
+
+  function drawChart(series) {
+    if (!chartEl) return;
+    const hasData = series.cpu.length > 1 || series.memory.length > 1;
+    chartHint.hidden = hasData;
+    chartEl.hidden = !hasData;
+    if (!hasData) return;
+
+    const narrow = window.innerWidth < 520;
+    const gutter = narrow ? 42 : 44;
+    const plotH = narrow ? 112 : 132;
+    const top = 8;
+    const width = Math.max(160, Math.round(chartEl.getBoundingClientRect().width));
+    const height = top + plotH + 10;
+    chartEl.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    chartEl.setAttribute('width', String(width));
+    chartEl.setAttribute('height', String(height));
+    chartEl.replaceChildren();
+
+    for (let k = 0; k <= 4; k++) {
+      const y = top + (plotH / 4) * k + 0.5;
+      chartEl.appendChild(svg('line', { class: 'grid', x1: gutter, y1: y, x2: width, y2: y, 'shape-rendering': 'crispEdges' }));
+    }
+    const marks = [[top, '100%'], [top + plotH / 2, '50%'], [top + plotH, '0%']];
+    for (const mark of marks) {
+      const label = svg('text', { class: 'axis', x: gutter - 8, y: mark[0], 'text-anchor': 'end', 'dominant-baseline': 'middle' });
+      label.textContent = mark[1];
+      chartEl.appendChild(label);
+    }
+
+    /* 30 分钟 @ 2 秒 = 900 个采样点,直接画会在几百像素里挤成一条噪声带。
+       每 ~3px 取一个桶的均值:曲线读得出走势,真实的负载起伏跨多个桶仍然看得见。 */
+    function downsample(values, maxPoints) {
+      if (values.length <= maxPoints) return values;
+      const out = [];
+      const bucket = values.length / maxPoints;
+      for (let i = 0; i < maxPoints; i++) {
+        const from = Math.floor(i * bucket);
+        const to = Math.max(from + 1, Math.min(values.length, Math.floor((i + 1) * bucket)));
+        let sum = 0;
+        for (let j = from; j < to; j++) sum += values[j];
+        out.push(sum / (to - from));
+      }
+      return out;
+    }
+
+    function line(raw, className) {
+      if (raw.length < 2) return;
+      const span = width - gutter;
+      const values = downsample(raw, Math.max(2, Math.floor(span / 3)));
+      let points = '';
+      for (let i = 0; i < values.length; i++) {
+        const x = gutter + (span * i) / (values.length - 1);
+        const v = Math.max(0, Math.min(100, values[i]));
+        const y = top + (1 - v / 100) * plotH;
+        points += (i ? ' ' : '') + x.toFixed(1) + ',' + y.toFixed(1);
+      }
+      chartEl.appendChild(svg('polyline', { class: className, points: points }));
+      const last = Math.max(0, Math.min(100, values[values.length - 1]));
+      chartEl.appendChild(svg('circle', {
+        cx: width, cy: top + (1 - last / 100) * plotH, r: 2.5,
+        fill: className === 'cpu' ? 'var(--rp-cpu)' : 'var(--rp-mem)',
+      }));
+    }
+    line(series.memory, 'mem');
+    line(series.cpu, 'cpu');
+  }
+
+  function render() {
+    if (!model) return;
+    const key = shapeOf(model);
+    if (key !== shapeKey) {
+      shapeKey = key;
+      build(model);
+    }
+    apply(model);
+  }
+
+  window.addEventListener('message', function (event) {
+    const message = event.data;
+    if (message && message.type === 'model') {
+      model = message.model;
+      render();
+    }
+  });
+  window.addEventListener('resize', function () { if (model) drawChart(model.series); });
+
+  vscode.postMessage({ type: 'ready' });
+`;
