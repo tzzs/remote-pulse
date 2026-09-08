@@ -33,10 +33,12 @@ export interface TrendPayload {
   thresholds: { warning: number; critical: number };
 }
 
-/** 远程主机的身份信息。user 在受限环境下可能取不到,所以是可选的。 */
+/** 远程主机的身份信息。user / addresses 在受限环境下可能取不到,所以都是可选的。 */
 export interface HostInfo {
   label: string;
   user?: string;
+  /** 全部非内网 IPv4,按网卡列出——多网卡机器(WSL 的 eth0 + docker0)只看一个地址是不够的。 */
+  addresses?: { iface: string; address: string }[];
 }
 
 /**
@@ -195,6 +197,10 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
   }
   if (latest?.uptimeSeconds !== undefined) {
     system.push({ label: vscode.l10n.t('Uptime'), detail: '', value: formatUptime(latest.uptimeSeconds), level: 'normal' });
+  }
+  // 每张网卡一行:标签就是网卡名,地址在数值列,和其余指标落在同一条右边线上。
+  for (const { iface, address } of host.addresses ?? []) {
+    system.push({ label: iface, detail: '', value: address, level: 'normal' });
   }
   if (system.length) {
     groups.push({ kind: 'metrics', title: vscode.l10n.t('System'), rows: system });

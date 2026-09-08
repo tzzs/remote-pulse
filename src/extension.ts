@@ -34,7 +34,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
   const dockerCollector = new DockerCollector();
 
   const hostLabel = resolveHostLabel();
-  const host: HostInfo = { label: hostLabel, user: safeUserName() };
+  const host: HostInfo = { label: hostLabel, user: safeUserName(), addresses: listIPv4Addresses() };
 
   let state: CollectionState = 'loading';
   let lastWasCritical = false;
@@ -188,20 +188,28 @@ function safeUptime(): number | undefined {
   }
 }
 
-function findNonInternalIPv4(): string | undefined {
+/** 多网卡机器上"第一个"地址是任意的,所以全部列出;超过 4 张网卡就不再是有用信息了。 */
+const MAX_SHOWN_INTERFACES = 4;
+
+function listIPv4Addresses(): { iface: string; address: string }[] {
   try {
     const interfaces = os.networkInterfaces();
+    const found: { iface: string; address: string }[] = [];
     for (const name of Object.keys(interfaces)) {
-      for (const iface of interfaces[name] ?? []) {
-        if (iface.family === 'IPv4' && !iface.internal) {
-          return iface.address;
+      for (const entry of interfaces[name] ?? []) {
+        if (entry.family === 'IPv4' && !entry.internal) {
+          found.push({ iface: name, address: entry.address });
         }
       }
     }
-    return undefined;
+    return found.slice(0, MAX_SHOWN_INTERFACES);
   } catch {
-    return undefined;
+    return [];
   }
+}
+
+function findNonInternalIPv4(): string | undefined {
+  return listIPv4Addresses()[0]?.address;
 }
 
 function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendPayload {
