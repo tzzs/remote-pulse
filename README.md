@@ -14,7 +14,7 @@ Most similar extensions just move a full dashboard into the status bar: dense, a
 
 | Aspect | Common approach elsewhere | Remote Pulse |
 |---|---|---|
-| Always-on footprint | CPU\|MEM\|DISK all shown flat | Just 1 icon + 1 core number by default; everything else lives in the tooltip |
+| Always-on footprint | CPU\|MEM\|DISK all shown flat | Just 1 icon + 1 core number by default; everything else lives in the trend panel |
 | Visual tone | Value-driven coloring at all times | Neutral by default; only colors up when a threshold is crossed |
 | Interaction | Some require opening a sidebar | Click to pop a lightweight Webview — no persistent space used, no trace left after closing |
 | Resource cost | Some poll via spawned subprocesses | Reads `/proc` directly; zero steady-state subprocess overhead for core metrics |
@@ -27,30 +27,18 @@ Default: $(pulse) 23%
 Alert:   $(warning) 92%   ← status bar background turns warning/critical color
 ```
 
-Hover to expand the tooltip:
-
-```
-Remote host: dev-gpu-01 (192.168.x.x)
-─────────────────────
-CPU     ▁▃▅▇▆▄▂  23%  (8 cores)
-Memory  ▂▂▃▄▄▃▂  61%  (9.8G / 16G)
-Uptime  12d 4h
-─────────────────────
-Click to view the trend chart
-```
-
-Click the status bar item to open a line chart of the last 30 minutes of CPU/memory history (a Webview that's destroyed on close — nothing stays resident in memory).
+Run `Remote Pulse: Show Trend Chart` to open a line chart of the last 30 minutes of CPU/memory history, plus disk/network/GPU/Docker detail (a Webview that's destroyed on close — nothing stays resident in memory).
 
 ## Features
 
 - **CPU**: overall usage and core count (delta-based `/proc/stat` calculation, not loadavg)
 - **Memory**: usage percentage and used/total (uses `MemAvailable` rather than `MemFree`, which better reflects what's actually available)
 - **Disk**: per-mount-point usage (virtual filesystems are filtered out automatically; shows the top 3 by usage by default, or specify mount points manually)
-- **Network**: upload/download rate (disabled by default to keep the tooltip uncluttered)
+- **Network**: upload/download rate (disabled by default to keep the trend panel uncluttered)
 - **GPU**: VRAM usage, utilization, temperature (requires `nvidia-smi`; the module simply stays inactive if it's unavailable)
 - **Docker**: running container count plus per-container CPU/memory usage (requires access to `/var/run/docker.sock`; degrades silently without permission)
 - **Threshold alerts**: the status bar changes color when CPU/memory crosses a threshold, with an optional system notification (fires once per crossing into the critical state, so it won't spam you)
-- **History trend**: a tooltip sparkline plus a Webview line chart on click
+- **History trend**: a Webview line chart of the last 30 minutes
 - **Adaptive polling**: automatically throttles once the window loses focus, reducing load on the remote machine
 - **Localized UI**: commands, settings, and the status bar/webview text follow VS Code's display language (English by default, with a 简体中文 translation)
 
@@ -95,7 +83,7 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 
 - **Non-Linux remote hosts**: CPU/memory automatically fall back to Node.js's `os` module (slightly less precise); the network module is hidden entirely since there's no cross-platform equivalent
 - **First connection**: the status bar initially shows a `$(sync~spin)` loading state
-- **Collection failure** (permissions / network flakiness): shows `$(circle-slash)`, with the reason explained in the tooltip — no intrusive error notifications
+- **Collection failure** (permissions / network flakiness): shows `$(circle-slash)` — no intrusive error notifications
 - **GPU/Docker unavailable**: probed once at startup; if missing or unauthorized, the module simply stays inactive rather than retrying repeatedly
 
 ## Development

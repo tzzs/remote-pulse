@@ -15,8 +15,6 @@ import { TrendPanel, TrendPayload } from './webview/trendPanel';
 import { formatHostLabel } from './util/hostLabel';
 
 const TREND_WINDOW_MS = 30 * 60 * 1000;
-/** tooltip 里的 sparkline 只需要"最近走势"的观感,取全部窗口样本会让字符串随开机时长无限变长。 */
-const SPARKLINE_POINTS = 20;
 
 /** 本地(非远程)窗口里没有"远程主机"可言,不应该出现状态栏/占用轮询资源。 */
 export function activate(context: vscode.ExtensionContext): { monitoring: boolean } {
@@ -56,11 +54,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     };
     store.push(snapshot);
 
-    const sparklines = {
-      cpu: store.recentValues(TREND_WINDOW_MS, s => s.cpu?.percent).slice(-SPARKLINE_POINTS),
-      memory: store.recentValues(TREND_WINDOW_MS, s => s.memory?.percent).slice(-SPARKLINE_POINTS),
-    };
-    statusBar.update(hostLabel, snapshot, config, state, sparklines);
+    statusBar.update(snapshot, config, state);
     maybeNotifyCritical(snapshot);
     if (TrendPanel.isOpen()) {
       TrendPanel.refreshIfOpen(hostLabel, buildTrendPayload(store, config));

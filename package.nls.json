@@ -10,7 +10,7 @@
   "config.template.description": "Status bar display template; ${cpu} and ${mem} are replaced with the current CPU/memory percentages",
   "config.enableGpu.description": "Whether to detect and show GPU info (requires nvidia-smi)",
   "config.enableDocker.description": "Whether to detect and show Docker container info (requires access to docker.sock)",
-  "config.enableNetwork.description": "Whether to show network upload/download rates in the tooltip",
+  "config.enableNetwork.description": "Whether to show network upload/download rates in the trend panel",
   "config.enableNotifications.description": "Whether to show a system notification when the critical threshold is crossed",
   "config.diskMountPoints.description": "Disk mount points to monitor; leave empty to auto-select the one with the highest usage"
 }

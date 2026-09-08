@@ -10,7 +10,7 @@
   "config.template.description": "状态栏显示模板,${cpu} 和 ${mem} 会被替换为当前 CPU/内存百分比",
   "config.enableGpu.description": "是否探测并展示 GPU 信息(需要 nvidia-smi)",
   "config.enableDocker.description": "是否探测并展示 Docker 容器信息(需要可访问 docker.sock)",
-  "config.enableNetwork.description": "是否在 tooltip 中展示网络上下行速率",
+  "config.enableNetwork.description": "是否在趋势面板中展示网络上下行速率",
   "config.enableNotifications.description": "越过严重阈值时是否弹出系统通知",
   "config.diskMountPoints.description": "指定要监控的磁盘挂载点,留空则自动选择使用率最高的挂载点"
 }
