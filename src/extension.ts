@@ -9,9 +9,9 @@ import { DockerCollector } from './collectors/docker';
 import { StatsStore } from './store/statsStore';
 import { Poller } from './scheduler';
 import { PulseStatusBar } from './statusBar';
-import { readConfig, isRemotePulseConfigChange } from './config';
+import { readConfig, isRemotePulseConfigChange, RemotePulseConfig } from './config';
 import { CollectionState, Snapshot } from './types';
-import { TrendPanel, TrendSeries } from './webview/trendPanel';
+import { TrendPanel, TrendPayload } from './webview/trendPanel';
 import { formatHostLabel } from './util/hostLabel';
 
 const TREND_WINDOW_MS = 30 * 60 * 1000;
@@ -63,7 +63,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     statusBar.update(hostLabel, snapshot, config, state, sparklines);
     maybeNotifyCritical(snapshot);
     if (TrendPanel.isOpen()) {
-      TrendPanel.refreshIfOpen(hostLabel, buildTrendSeries(store));
+      TrendPanel.refreshIfOpen(hostLabel, buildTrendPayload(store, config));
     }
   }
 
@@ -138,7 +138,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
   });
 
   const showTrendCommand = vscode.commands.registerCommand('remotePulse.showTrend', () => {
-    TrendPanel.createOrShow(hostLabel, buildTrendSeries(store));
+    TrendPanel.createOrShow(hostLabel, buildTrendPayload(store, config));
   });
 
   const refreshCommand = vscode.commands.registerCommand('remotePulse.refresh', async () => {
@@ -200,13 +200,27 @@ function findNonInternalIPv4(): string | undefined {
   }
 }
 
-function buildTrendSeries(store: StatsStore): TrendSeries {
+function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendPayload {
   const history = store.getHistory();
   const cutoff = Date.now() - TREND_WINDOW_MS;
   const windowed = history.filter(s => s.timestamp >= cutoff);
+  const latestSnapshot = store.latest();
+
   return {
-    timestamps: windowed.map(s => s.timestamp),
-    cpu: windowed.map(s => s.cpu?.percent ?? 0),
-    memory: windowed.map(s => s.memory?.percent ?? 0),
+    series: {
+      timestamps: windowed.map(s => s.timestamp),
+      cpu: windowed.map(s => s.cpu?.percent ?? 0),
+      memory: windowed.map(s => s.memory?.percent ?? 0),
+    },
+    latest: latestSnapshot && {
+      cpu: latestSnapshot.cpu,
+      memory: latestSnapshot.memory,
+      disks: latestSnapshot.disks ?? [],
+      network: config.enableNetwork ? latestSnapshot.network : undefined,
+      gpus: config.enableGpu ? (latestSnapshot.gpus ?? []) : [],
+      docker: config.enableDocker ? latestSnapshot.docker : undefined,
+      uptimeSeconds: latestSnapshot.uptimeSeconds,
+    },
+    thresholds: { warning: config.warningThreshold, critical: config.criticalThreshold },
   };
 }

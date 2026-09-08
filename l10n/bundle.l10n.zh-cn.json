@@ -15,5 +15,9 @@
   "Remote host": "远程主机",
   "Remote Pulse Trend": "Remote Pulse 趋势图",
   "past 30 minutes": "过去 30 分钟",
-  "Not enough history data yet. Please wait a few seconds and reopen.": "暂无足够的历史数据,请稍候几秒再打开。"
+  "Not enough history data yet. Please wait a few seconds and reopen.": "暂无足够的历史数据,请稍候几秒再打开。",
+  "Updated {0}": "更新于 {0}",
+  "Utilization": "使用率",
+  "Docker containers": "Docker 容器",
+  "No containers running": "当前没有运行中的容器"
 }
