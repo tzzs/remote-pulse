@@ -202,7 +202,6 @@ function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendP
 
   return {
     series: {
-      timestamps: windowed.map(s => s.timestamp),
       cpu: windowed.map(s => s.cpu?.percent ?? 0),
       memory: windowed.map(s => s.memory?.percent ?? 0),
     },
