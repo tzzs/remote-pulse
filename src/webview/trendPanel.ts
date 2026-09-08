@@ -13,6 +13,8 @@ function nonce(): string {
 }
 
 export interface TrendSeries {
+  /** 与 cpu/memory 一一对应的 epoch ms,悬浮提示要靠它算出该点的具体时间。 */
+  timestamps: number[];
   cpu: number[];
   memory: number[];
 }
@@ -58,16 +60,22 @@ interface MetricRow {
   strong?: boolean;
 }
 
+interface ChartLegendItem {
+  name: string;
+  /** 最新一次采集的即时值,和图表末端的圆点是同一个数,不随悬浮变化。 */
+  value?: string;
+}
+
 type PanelGroup =
   | { kind: 'metrics'; title: string; badge?: string; rows: MetricRow[] }
-  | { kind: 'chart'; title: string; legend: [string, string]; emptyHint: string }
+  | { kind: 'chart'; title: string; legend: [ChartLegendItem, ChartLegendItem]; emptyHint: string }
   | { kind: 'table'; title: string; badge?: string; columns: [string, string]; rows: [string, string, string][]; emptyHint?: string };
 
 interface PanelModel {
   host: { name: string; meta: string; user?: string };
   updated: string;
   groups: PanelGroup[];
-  series: { cpu: number[]; memory: number[] };
+  series: { timestamps: number[]; cpu: number[]; memory: number[] };
 }
 
 /**
@@ -209,7 +217,10 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
   groups.push({
     kind: 'chart',
     title: vscode.l10n.t('past 30 minutes'),
-    legend: ['CPU', vscode.l10n.t('Memory')],
+    legend: [
+      { name: 'CPU', value: latest?.cpu ? `${Math.round(latest.cpu.percent)}%` : undefined },
+      { name: vscode.l10n.t('Memory'), value: latest?.memory ? `${Math.round(latest.memory.percent)}%` : undefined },
+    ],
     emptyHint: vscode.l10n.t('Not enough history data yet. Please wait a few seconds and reopen.'),
   });
 
@@ -278,7 +289,7 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
     host: { ...splitHostLabel(host.label), user: host.user },
     updated: vscode.l10n.t('Updated {0}', updatedAt),
     groups,
-    series: { cpu: series.cpu, memory: series.memory },
+    series: { timestamps: series.timestamps, cpu: series.cpu, memory: series.memory },
   };
 }
 
@@ -357,16 +368,36 @@ const PANEL_CSS = `
   .trow span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .trow span:first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .legend { display: flex; align-items: center; gap: 12px; margin-left: auto;
+  .legend { display: flex; align-items: center; gap: 14px; margin-left: auto;
             font-size: 11px; line-height: 16px; color: var(--rp-muted); }
   .legend-item { display: flex; align-items: center; gap: 5px; }
-  .swatch { width: 8px; height: 2px; border-radius: 1px; }
-  .chart { display: block; width: 100%; margin-top: 4px; }
+  .legend-value { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; }
+  .swatch { width: 8px; height: 2px; border-radius: 1px; flex-shrink: 0; }
+  /* 悬浮提示是绝对定位在图表上的浮层,包裹容器要立坐标系。 */
+  .chart-wrap { position: relative; margin-top: 4px; }
+  .chart { display: block; width: 100%; cursor: crosshair; }
   .chart .grid { stroke: var(--rp-hairline); stroke-width: 1; }
   .chart .axis { fill: var(--rp-muted); font-size: 11px; }
   .chart .cpu { fill: none; stroke: var(--rp-cpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .mem { fill: none; stroke: var(--rp-mem); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .guide { stroke: var(--rp-muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; pointer-events: none; }
+  .chart .hover-dot { opacity: 0; pointer-events: none; }
   .hint { font-size: 11px; line-height: 16px; color: var(--rp-muted); margin: 6px 0 0; }
+
+  /* VS Code 的 hover widget token——用同一套语义色,浮层才像"原生弹出",不是自造的卡片。 */
+  .chart-tooltip {
+    position: absolute; z-index: 1; top: 0; left: 0;
+    display: none; flex-direction: column; gap: 2px;
+    padding: 6px 8px; border-radius: 3px; white-space: nowrap; pointer-events: none;
+    font-size: 11px; line-height: 16px;
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--rp-hairline));
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  }
+  .chart-tooltip .time { color: var(--rp-muted); }
+  .chart-tooltip .metric { display: flex; align-items: center; gap: 6px; }
+  .chart-tooltip .metric .swatch { width: 6px; height: 6px; border-radius: 50%; }
+  .chart-tooltip .metric .value { margin-left: auto; font-variant-numeric: tabular-nums; }
 
   /* 面板常以 ViewColumn.Beside 打开,窄栏是常态:进度条改占整行,信息一条不丢。 */
   @media (max-width: 520px) {
@@ -384,6 +415,9 @@ const PANEL_CSS = `
     .row-value { grid-area: value; }
     .track { grid-area: bar; margin-top: 2px; }
     .trow { grid-template-columns: minmax(0, 1fr) 60px 72px; gap: 8px; }
+    /* 图例现在带着"CPU 61%"这样的数值,窄栏里和标题挤不下,允许换到第二行。 */
+    .section-head { flex-wrap: wrap; row-gap: 4px; }
+    .legend { margin-left: 0; }
   }
 `;
 
@@ -395,6 +429,18 @@ const PANEL_SCRIPT = `
   let slots = [];
   let chartEl = null;
   let chartHint = null;
+  let chartTooltip = null;
+  let chartLegendNames = ['CPU', 'Memory'];
+  /** 悬浮态跨轮询保留:每 2 秒的重绘会重建折线和圆点,如果不在重绘后把悬浮指示器按住原位置
+      重新画一次,鼠标不动也会看到它每 2 秒闪一下。 */
+  let chartGuide = null;
+  let chartDotCpu = null;
+  let chartDotMem = null;
+  let hovering = false;
+  let lastPointerClientX = 0;
+  let lastPointerClientY = 0;
+  /** 当前这一屏折线对应的原始数据,悬浮时按屏幕 x 坐标反查最近的点。 */
+  let chartData = null;
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -431,6 +477,12 @@ const PANEL_SCRIPT = `
     slots = [];
     chartEl = null;
     chartHint = null;
+    chartTooltip = null;
+    chartGuide = null;
+    chartDotCpu = null;
+    chartDotMem = null;
+    chartData = null;
+    hovering = false;
     const frag = document.createDocumentFragment();
 
     const host = el('div', 'host');
@@ -463,20 +515,32 @@ const PANEL_SCRIPT = `
       head.appendChild(el('span', 'section-title', group.title));
 
       if (group.kind === 'chart') {
+        chartLegendNames = [group.legend[0].name, group.legend[1].name];
         const legend = el('span', 'legend');
-        const names = group.legend;
-        for (let i = 0; i < names.length; i++) {
+        for (let i = 0; i < group.legend.length; i++) {
           const item = el('span', 'legend-item');
           const dot = el('span', 'swatch');
           dot.style.background = i === 0 ? 'var(--rp-cpu)' : 'var(--rp-mem)';
           item.appendChild(dot);
-          item.appendChild(document.createTextNode(names[i]));
+          item.appendChild(document.createTextNode(group.legend[i].name));
+          // 末端圆点旁边这个数才是真正的"当前值"——每轮采集都更新,不需要悬浮就看得到。
+          const valueEl = el('span', 'legend-value', group.legend[i].value || '');
+          item.appendChild(valueEl);
           legend.appendChild(item);
+          slots.push({ kind: 'legend-value', node: valueEl });
         }
         head.appendChild(legend);
         section.appendChild(head);
+
+        const chartWrap = el('div', 'chart-wrap');
         chartEl = svg('svg', { class: 'chart', preserveAspectRatio: 'none' });
-        section.appendChild(chartEl);
+        chartEl.addEventListener('pointermove', onChartPointerMove);
+        chartEl.addEventListener('pointerleave', onChartPointerLeave);
+        chartWrap.appendChild(chartEl);
+        chartTooltip = el('div', 'chart-tooltip');
+        chartWrap.appendChild(chartTooltip);
+        section.appendChild(chartWrap);
+
         chartHint = el('p', 'hint', group.emptyHint);
         chartHint.hidden = true;
         section.appendChild(chartHint);
@@ -548,7 +612,13 @@ const PANEL_SCRIPT = `
     let i = 0;
     slots[i++].node.textContent = m.updated;
     for (const group of m.groups) {
-      if (group.kind === 'chart') continue;
+      if (group.kind === 'chart') {
+        for (const item of group.legend) {
+          const slot = slots[i++];
+          slot.node.textContent = item.value || '';
+        }
+        continue;
+      }
       if (group.kind === 'metrics') {
         for (const row of group.rows) {
           const slot = slots[i++];
@@ -569,12 +639,128 @@ const PANEL_SCRIPT = `
     drawChart(m.series);
   }
 
+  /* 30 分钟 @ 2 秒 = 900 个采样点,直接画会在几百像素里挤成一条噪声带。
+     每 ~3px 取一个桶的均值:曲线读得出走势,真实的负载起伏跨多个桶仍然看得见。
+     timestamps 用同一个函数按同样的桶数降采样,才能和 cpu/memory 逐点对上——
+     三个数组来自同一份原始快照,长度天生相等,桶的切法只取决于长度和目标点数。 */
+  function downsample(values, maxPoints) {
+    if (values.length <= maxPoints) return values;
+    const out = [];
+    const bucket = values.length / maxPoints;
+    for (let i = 0; i < maxPoints; i++) {
+      const from = Math.floor(i * bucket);
+      const to = Math.max(from + 1, Math.min(values.length, Math.floor((i + 1) * bucket)));
+      let sum = 0;
+      for (let j = from; j < to; j++) sum += values[j];
+      out.push(sum / (to - from));
+    }
+    return out;
+  }
+
+  function hideHover() {
+    hovering = false;
+    if (chartGuide) chartGuide.style.opacity = '0';
+    if (chartDotCpu) chartDotCpu.style.opacity = '0';
+    if (chartDotMem) chartDotMem.style.opacity = '0';
+    if (chartTooltip) chartTooltip.style.display = 'none';
+  }
+
+  function renderTooltipContent(cpuValue, memValue, timeMs) {
+    chartTooltip.replaceChildren();
+    const d = new Date(timeMs);
+    chartTooltip.appendChild(el('div', 'time', isNaN(d.getTime()) ? '' : d.toLocaleTimeString()));
+
+    function metricRow(colorVar, name, value) {
+      const row = el('div', 'metric');
+      const dot = el('span', 'swatch');
+      dot.style.background = colorVar;
+      row.appendChild(dot);
+      row.appendChild(el('span', '', name));
+      row.appendChild(el('span', 'value', Math.round(Math.max(0, Math.min(100, value))) + '%'));
+      return row;
+    }
+    chartTooltip.appendChild(metricRow('var(--rp-cpu)', chartLegendNames[0], cpuValue));
+    chartTooltip.appendChild(metricRow('var(--rp-mem)', chartLegendNames[1], memValue));
+  }
+
+  /** clientX/clientY 是最近一次真实指针事件的坐标;重绘后用同一坐标重算,悬浮态才能跨轮询保留。 */
+  function updateHoverAt(clientX, clientY) {
+    if (!chartData || chartData.xs.length === 0 || !chartEl || !chartGuide) {
+      hideHover();
+      return;
+    }
+    const rect = chartEl.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const viewBoxWidth = chartEl.viewBox && chartEl.viewBox.baseVal ? chartEl.viewBox.baseVal.width : rect.width;
+    const scale = viewBoxWidth / rect.width;
+    const xUnits = (clientX - rect.left) * scale;
+
+    let nearest = 0;
+    let bestDist = Infinity;
+    for (let idx = 0; idx < chartData.xs.length; idx++) {
+      const dist = Math.abs(chartData.xs[idx] - xUnits);
+      if (dist < bestDist) { bestDist = dist; nearest = idx; }
+    }
+
+    const x = chartData.xs[nearest];
+    const cpuValue = chartData.cpuVals[nearest];
+    const memValue = chartData.memVals[nearest];
+    const cpuY = chartData.top + (1 - Math.max(0, Math.min(100, cpuValue)) / 100) * chartData.plotH;
+    const memY = chartData.top + (1 - Math.max(0, Math.min(100, memValue)) / 100) * chartData.plotH;
+
+    chartGuide.setAttribute('x1', x);
+    chartGuide.setAttribute('x2', x);
+    chartGuide.style.opacity = '1';
+    chartDotCpu.setAttribute('cx', x);
+    chartDotCpu.setAttribute('cy', cpuY);
+    chartDotCpu.style.opacity = '1';
+    chartDotMem.setAttribute('cx', x);
+    chartDotMem.setAttribute('cy', memY);
+    chartDotMem.style.opacity = '1';
+
+    renderTooltipContent(cpuValue, memValue, chartData.times[nearest]);
+
+    const wrap = chartEl.parentElement;
+    const wrapRect = wrap.getBoundingClientRect();
+    const offsetX = rect.left - wrapRect.left;
+    const offsetY = rect.top - wrapRect.top;
+    const pointLocalX = offsetX + x / scale;
+    const pointLocalY = offsetY + Math.min(cpuY, memY) / scale;
+
+    chartTooltip.style.display = 'flex';
+    const ttWidth = chartTooltip.offsetWidth;
+    const ttHeight = chartTooltip.offsetHeight;
+    let left = pointLocalX + 12;
+    if (left + ttWidth > wrapRect.width) left = pointLocalX - ttWidth - 12;
+    if (left < 0) left = 4;
+    let top2 = pointLocalY - ttHeight - 10;
+    if (top2 < 0) top2 = pointLocalY + 14;
+    if (top2 + ttHeight > wrapRect.height) top2 = Math.max(0, wrapRect.height - ttHeight - 4);
+    chartTooltip.style.left = left + 'px';
+    chartTooltip.style.top = top2 + 'px';
+  }
+
+  function onChartPointerMove(event) {
+    hovering = true;
+    lastPointerClientX = event.clientX;
+    lastPointerClientY = event.clientY;
+    updateHoverAt(event.clientX, event.clientY);
+  }
+
+  function onChartPointerLeave() {
+    hideHover();
+  }
+
   function drawChart(series) {
     if (!chartEl) return;
     const hasData = series.cpu.length > 1 || series.memory.length > 1;
     chartHint.hidden = hasData;
     chartEl.hidden = !hasData;
-    if (!hasData) return;
+    if (!hasData) {
+      chartData = null;
+      hideHover();
+      return;
+    }
 
     const narrow = window.innerWidth < 520;
     const gutter = narrow ? 42 : 44;
@@ -598,42 +784,50 @@ const PANEL_SCRIPT = `
       chartEl.appendChild(label);
     }
 
-    /* 30 分钟 @ 2 秒 = 900 个采样点,直接画会在几百像素里挤成一条噪声带。
-       每 ~3px 取一个桶的均值:曲线读得出走势,真实的负载起伏跨多个桶仍然看得见。 */
-    function downsample(values, maxPoints) {
-      if (values.length <= maxPoints) return values;
-      const out = [];
-      const bucket = values.length / maxPoints;
-      for (let i = 0; i < maxPoints; i++) {
-        const from = Math.floor(i * bucket);
-        const to = Math.max(from + 1, Math.min(values.length, Math.floor((i + 1) * bucket)));
-        let sum = 0;
-        for (let j = from; j < to; j++) sum += values[j];
-        out.push(sum / (to - from));
-      }
-      return out;
-    }
+    const span = width - gutter;
+    const maxPoints = Math.max(2, Math.floor(span / 3));
+    const cpuVals = downsample(series.cpu, maxPoints);
+    const memVals = downsample(series.memory, maxPoints);
+    const times = downsample(series.timestamps, maxPoints);
+    const count = cpuVals.length;
+    const xs = [];
+    for (let i = 0; i < count; i++) xs.push(gutter + (span * i) / (count - 1));
 
-    function line(raw, className) {
-      if (raw.length < 2) return;
-      const span = width - gutter;
-      const values = downsample(raw, Math.max(2, Math.floor(span / 3)));
+    function line(values, className) {
+      if (values.length < 2) return;
       let points = '';
       for (let i = 0; i < values.length; i++) {
-        const x = gutter + (span * i) / (values.length - 1);
         const v = Math.max(0, Math.min(100, values[i]));
         const y = top + (1 - v / 100) * plotH;
-        points += (i ? ' ' : '') + x.toFixed(1) + ',' + y.toFixed(1);
+        points += (i ? ' ' : '') + xs[i].toFixed(1) + ',' + y.toFixed(1);
       }
       chartEl.appendChild(svg('polyline', { class: className, points: points }));
       const last = Math.max(0, Math.min(100, values[values.length - 1]));
       chartEl.appendChild(svg('circle', {
-        cx: width, cy: top + (1 - last / 100) * plotH, r: 2.5,
+        cx: xs[xs.length - 1], cy: top + (1 - last / 100) * plotH, r: 2.5,
         fill: className === 'cpu' ? 'var(--rp-cpu)' : 'var(--rp-mem)',
       }));
     }
-    line(series.memory, 'mem');
-    line(series.cpu, 'cpu');
+    line(memVals, 'mem');
+    line(cpuVals, 'cpu');
+
+    // 悬浮的十字线和两个圆点:默认透明(见 CSS .guide/.hover-dot),指针移动时才显形。
+    chartGuide = svg('line', { class: 'guide', x1: gutter, y1: top, x2: gutter, y2: top + plotH });
+    chartEl.appendChild(chartGuide);
+    chartDotMem = svg('circle', { class: 'hover-dot', r: 3, fill: 'var(--rp-mem)' });
+    chartEl.appendChild(chartDotMem);
+    chartDotCpu = svg('circle', { class: 'hover-dot', r: 3, fill: 'var(--rp-cpu)' });
+    chartEl.appendChild(chartDotCpu);
+
+    chartData = { xs: xs, cpuVals: cpuVals, memVals: memVals, times: times, top: top, plotH: plotH };
+
+    // 每轮采集都会重建以上这些元素:鼠标没动的话,在同一位置立刻把悬浮指示器画回去,
+    // 否则用户停在某个点上看数值时,指示器会跟着 2 秒一次的刷新一起消失再出现。
+    if (hovering) {
+      updateHoverAt(lastPointerClientX, lastPointerClientY);
+    } else {
+      hideHover();
+    }
   }
 
   function render() {
