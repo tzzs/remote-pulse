@@ -96,7 +96,9 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
       light.cpu = cpu;
       light.memory = memory;
       light.disks = disks;
-      light.network = config.trendPanelSections.includes('network') ? await networkCollector.collect() : undefined;
+      // 网络既可能只在趋势面板里展示,也可能只在状态栏里展示(或者两处都要)——只要任意一处需要就得采集。
+      const needsNetwork = config.trendPanelSections.includes('network') || config.statusBarMetrics.includes('network');
+      light.network = needsNetwork ? await networkCollector.collect() : undefined;
       if (cpu) {
         state = 'ok';
       }
@@ -108,7 +110,9 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
   }
 
   async function collectHeavy(): Promise<void> {
-    heavy.gpus = config.trendPanelSections.includes('gpu') ? await gpuCollector.collect() : undefined;
+    // 同理,GPU 数据可能只喂状态栏(取第一张卡做摘要),也可能只喂趋势面板(逐卡详情)。
+    const needsGpu = config.trendPanelSections.includes('gpu') || config.statusBarMetrics.includes('gpu');
+    heavy.gpus = needsGpu ? await gpuCollector.collect() : undefined;
     heavy.docker = config.trendPanelSections.includes('docker') ? await dockerCollector.collect() : undefined;
   }
 

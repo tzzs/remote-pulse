@@ -23,14 +23,14 @@
 ## 效果预览
 
 ```
-$(pulse) CPU 23%  MEM 61%    ← 全部正常,绿色
-$(pulse) CPU 85%  MEM 40%    ← 仅 CPU 越过警告阈值,变黄色——内存保持绿色
-$(warning) CPU 28%  MEM 97%  ← 仅内存进入严重阈值,变红色——图标跟随两者中更严重的那个
+$(pulse) CPU 23%  MEM 61%                          ← 全部正常
+$(pulse) CPU 85%  MEM 40%                          ← 仅 CPU 越过警告阈值,变黄色——内存保持默认色
+$(warning) CPU 28%  MEM 97%  GPU 12%  NET 340 KB/s ← 仅内存进入严重阈值,变红色——图标跟随已展示指标里最严重的那个
 ```
 
-CPU 和内存是两个独立着色的状态栏项,图标始终显示两者中更严重的等级——和 VS Code 自带的远程连接指示器同一套绿/黄/红配色语言。这几个颜色是写死的固定色值(不经过主题 token),不管状态栏实际背景是什么颜色都能保持清晰可辨。
+CPU、内存、GPU(仅第一张卡)、网络(上下行合计速率)最多可以是四个独立着色的状态栏项——通过 `remotePulse.statusBarMetrics` 选择要展示哪些(默认只有 CPU/内存)。共用的告警图标反映已勾选指标里最严重的等级——网络只负责展示不参与告警配色,因为吞吐量没有天然的 0-100% 上限——配色用的是 VS Code 官方的 `statusBarItem.warning*`/`error*` 主题 token,所以不管状态栏实际背景是什么颜色(比如被 Remote-SSH 整条改色)都能保持清晰可辨。
 
-点击这三个项中的任意一个——或运行「Remote Pulse: Show Trend Chart」命令——弹出 30 分钟 CPU/内存趋势的折线图,以及磁盘/网络/GPU/Docker 详情(Webview,关闭即销毁,不常驻内存)。面板顶部的齿轮图标可以直接打开本插件的设置。
+点击 CPU/内存/GPU/网络任意一项——或运行「Remote Pulse: Show Trend Chart」命令——弹出 30 分钟趋势的折线图,以及磁盘/网络/GPU/Docker 详情(Webview,关闭即销毁,不常驻内存)。告警图标本身则是直接跳转到 `statusBarMetrics` 的多选配置——VS Code 的设置界面对数组配置只能渲染成列表编辑器,不是真正的勾选框,所以这个命令(以及面板齿轮图标里能找到的 `trendPanelSections` 对应命令)才是真正"一次性勾选所有想要的项"的入口。
 
 ## 功能
 
@@ -70,15 +70,17 @@ code --install-extension remote-pulse-0.1.0.vsix
 | `remotePulse.heavyMetricInterval` | `10000` | GPU/Docker 等低频指标独立轮询间隔(ms) |
 | `remotePulse.warningThreshold` | `80` | 告警阈值(%) |
 | `remotePulse.criticalThreshold` | `95` | 严重阈值(%) |
-| `remotePulse.statusBarMetrics` | `["cpu", "memory"]` | 状态栏要展示哪些指标(设置界面里是勾选框);未勾选的指标仍然能在趋势面板里看到 |
-| `remotePulse.trendPanelSections` | `["gpu", "docker"]` | 趋势面板要展示哪些可选区块(勾选框);System 和 Storage 始终展示。勾选 `network` 后,网络速率还会作为一条线画进过去 30 分钟的图表 |
+| `remotePulse.statusBarMetrics` | `["cpu", "memory"]` | 状态栏要展示哪些指标——`cpu`、`memory`、`gpu`(仅第一张卡)、`network`(合计速率);未选中的指标仍然能在趋势面板里看到。运行「Remote Pulse: 配置状态栏指标」获得真正的多选勾选框 |
+| `remotePulse.trendPanelSections` | `["gpu", "docker"]` | 趋势面板要展示哪些可选区块;System 和 Storage 始终展示。勾选 `network` 后,网络速率还会作为一条线画进过去 30 分钟的图表。运行「Remote Pulse: 配置趋势面板板块」获得真正的多选勾选框 |
 | `remotePulse.enableNotifications` | `false` | 越过严重阈值时是否弹出系统通知 |
 | `remotePulse.diskMountPoints` | `[]` | 指定要监控的挂载点,留空则自动选 Top 3 |
 
 ## 命令
 
-- `Remote Pulse: 显示趋势图`(`remotePulse.showTrend`,也绑定在状态栏点击上)
+- `Remote Pulse: 显示趋势图`(`remotePulse.showTrend`,也绑定在 CPU/内存/GPU/网络状态栏项的点击上)
 - `Remote Pulse: 立即刷新`(`remotePulse.refresh`)
+- `Remote Pulse: 配置状态栏指标`(`remotePulse.configureStatusBarMetrics`,也绑定在告警图标的点击上)
+- `Remote Pulse: 配置趋势面板板块`(`remotePulse.configureTrendPanelSections`)
 
 ## 边界情况
 

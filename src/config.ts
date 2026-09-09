@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-export type StatusBarMetric = 'cpu' | 'memory';
+export type StatusBarMetric = 'cpu' | 'memory' | 'gpu' | 'network';
 export type TrendPanelSection = 'network' | 'gpu' | 'docker';
 
 export interface RemotePulseConfig {
@@ -48,6 +48,8 @@ export async function configureStatusBarMetrics(): Promise<void> {
   const options: { key: StatusBarMetric; label: string }[] = [
     { key: 'cpu', label: vscode.l10n.t('CPU usage') },
     { key: 'memory', label: vscode.l10n.t('Memory usage') },
+    { key: 'gpu', label: vscode.l10n.t('GPU utilization (primary GPU only)') },
+    { key: 'network', label: vscode.l10n.t('Network transfer rate') },
   ];
   await runMultiSelect('statusBarMetrics', options, vscode.l10n.t('Choose which metrics to show in the status bar'));
 }

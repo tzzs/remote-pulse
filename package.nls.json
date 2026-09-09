@@ -13,6 +13,8 @@
   "config.statusBarMetrics.markdownDescription": "Which metrics to show as status bar items; the rest still appear in the trend panel. Run `Remote Pulse: Configure Status Bar Metrics` from the Command Palette to pick from all options at once.",
   "config.statusBarMetrics.cpu.description": "CPU usage",
   "config.statusBarMetrics.memory.description": "Memory usage",
+  "config.statusBarMetrics.gpu.description": "GPU utilization of the primary GPU only (requires nvidia-smi); all GPUs still appear in the trend panel",
+  "config.statusBarMetrics.network.description": "Combined network upload+download rate; per-direction detail still appears in the trend panel",
   "config.trendPanelSections.description": "Which optional sections to show in the trend panel; System and Storage are always shown. Run \"Remote Pulse: Configure Trend Panel Sections\" from the Command Palette to pick from all options at once.",
   "config.trendPanelSections.markdownDescription": "Which optional sections to show in the trend panel; System and Storage are always shown. Run `Remote Pulse: Configure Trend Panel Sections` from the Command Palette to pick from all options at once.",
   "config.trendPanelSections.network.description": "Network upload/download rate, also plotted as a line in the 30-minute chart",

@@ -46,15 +46,19 @@ suite('PulseStatusBar (integration)', () => {
     bar?.dispose();
   });
 
-  test('all three items sit on the left with descending priority, next to the Remote-SSH indicator', () => {
+  test('all five items sit on the left with descending priority, next to the Remote-SSH indicator', () => {
     bar = new PulseStatusBar();
-    const { icon, cpu, mem } = bar.debugState;
+    const { icon, cpu, mem, gpu, network } = bar.debugState;
     assert.equal(icon.alignment, vscode.StatusBarAlignment.Left);
     assert.equal(cpu.alignment, vscode.StatusBarAlignment.Left);
     assert.equal(mem.alignment, vscode.StatusBarAlignment.Left);
+    assert.equal(gpu.alignment, vscode.StatusBarAlignment.Left);
+    assert.equal(network.alignment, vscode.StatusBarAlignment.Left);
     assert.equal(icon.priority, 1000);
     assert.equal(cpu.priority, 999);
     assert.equal(mem.priority, 998);
+    assert.equal(gpu.priority, 997);
+    assert.equal(network.priority, 996);
   });
 
   test('starts in a loading state before the first update, with CPU/memory items hidden', () => {
@@ -122,12 +126,14 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(themeColorId(bar.debugState.icon.color), ERROR_FG);
   });
 
-  test('has no tooltip, so hovering over the status bar items shows nothing', () => {
+  test('the alert icon carries a tooltip explaining its click target, the metric items stay tooltip-less', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith(), baseConfig(), 'ok');
-    assert.equal(bar.debugState.icon.tooltip, undefined);
+    assert.notEqual(bar.debugState.icon.tooltip, undefined);
     assert.equal(bar.debugState.cpu.tooltip, undefined);
     assert.equal(bar.debugState.mem.tooltip, undefined);
+    assert.equal(bar.debugState.gpu.tooltip, undefined);
+    assert.equal(bar.debugState.network.tooltip, undefined);
   });
 
   test('showError sets an error icon and hides CPU/memory', () => {
@@ -158,12 +164,62 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(bar.debugState.mem.visible, true);
   });
 
-  // 悬浮 tooltip 已移除,磁盘/网络/GPU/Docker 只在趋势面板里能看到,
-  // 点击就是这个面板在命令面板之外的唯一入口——所以这条绑定不能再被摘掉,三个项都要能点开。
-  test('clicking any of the three items opens the trend panel', () => {
+  // CPU/内存/GPU/网络四个数字项点了都进趋势面板,这是命令面板之外看磁盘/Docker等其余指标的唯一入口。
+  // 告警图标改点"配置状态栏指标"多选框——四个数字项已经能进面板了,图标不用再重复这条绑定。
+  test('clicking a metric item opens the trend panel; clicking the alert icon opens the status bar metrics picker', () => {
     bar = new PulseStatusBar();
-    assert.equal(bar.debugState.icon.command, 'remotePulse.showTrend');
+    assert.equal(bar.debugState.icon.command, 'remotePulse.configureStatusBarMetrics');
     assert.equal(bar.debugState.cpu.command, 'remotePulse.showTrend');
     assert.equal(bar.debugState.mem.command, 'remotePulse.showTrend');
+    assert.equal(bar.debugState.gpu.command, 'remotePulse.showTrend');
+    assert.equal(bar.debugState.network.command, 'remotePulse.showTrend');
+  });
+
+  test('GPU item is hidden even when configured if no GPU data was collected (no nvidia-smi)', () => {
+    bar = new PulseStatusBar();
+    bar.update(snapshotWith(), baseConfig({ statusBarMetrics: ['cpu', 'memory', 'gpu'] }), 'ok');
+    assert.equal(bar.debugState.gpu.visible, false);
+  });
+
+  test('GPU item shows the primary GPU utilization and joins the overall alert level', () => {
+    bar = new PulseStatusBar();
+    bar.update(
+      snapshotWith({
+        gpus: [
+          { index: 0, utilizationPercent: 97, memoryUsedMb: 1000, memoryTotalMb: 8000, temperatureC: 60 },
+          { index: 1, utilizationPercent: 5, memoryUsedMb: 100, memoryTotalMb: 8000, temperatureC: 40 },
+        ],
+      }),
+      baseConfig({ statusBarMetrics: ['cpu', 'memory', 'gpu'] }),
+      'ok',
+    );
+    assert.equal(bar.debugState.gpu.visible, true);
+    assert.equal(bar.debugState.gpu.text, 'GPU 97%');
+    assert.equal(themeColorId(bar.debugState.gpu.color), ERROR_FG);
+    assert.equal(themeColorId(bar.debugState.icon.color), ERROR_FG);
+  });
+
+  test('Network item is hidden until config enables it and a rate sample has been collected', () => {
+    bar = new PulseStatusBar();
+    bar.update(snapshotWith({ network: { rxRate: 1024, txRate: 512 } }), baseConfig(), 'ok');
+    assert.equal(bar.debugState.network.visible, false);
+
+    bar.update(snapshotWith(), baseConfig({ statusBarMetrics: ['cpu', 'memory', 'network'] }), 'ok');
+    assert.equal(bar.debugState.network.visible, false);
+  });
+
+  test('Network item shows the combined rx+tx rate and never takes an alert color', () => {
+    bar = new PulseStatusBar();
+    bar.update(
+      snapshotWith({ network: { rxRate: 900_000, txRate: 900_000 } }),
+      baseConfig({ statusBarMetrics: ['cpu', 'memory', 'network'] }),
+      'ok',
+    );
+    assert.equal(bar.debugState.network.visible, true);
+    assert.equal(bar.debugState.network.text, 'NET 1.7 MB/s');
+    assert.equal(bar.debugState.network.color, undefined);
+    assert.equal(bar.debugState.network.backgroundColor, undefined);
+    // 网络没有告警语义,不该把图标带成红色——即使数值很大。
+    assert.equal(themeColorId(bar.debugState.icon.color), undefined);
   });
 });

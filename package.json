@@ -100,8 +100,13 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["cpu", "memory"],
-            "enumDescriptions": ["%config.statusBarMetrics.cpu.description%", "%config.statusBarMetrics.memory.description%"]
+            "enum": ["cpu", "memory", "gpu", "network"],
+            "enumDescriptions": [
+              "%config.statusBarMetrics.cpu.description%",
+              "%config.statusBarMetrics.memory.description%",
+              "%config.statusBarMetrics.gpu.description%",
+              "%config.statusBarMetrics.network.description%"
+            ]
           },
           "uniqueItems": true,
           "default": ["cpu", "memory"],

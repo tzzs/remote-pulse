@@ -13,6 +13,8 @@
   "config.statusBarMetrics.markdownDescription": "状态栏要展示哪些指标;未选中的指标仍然能在趋势面板里看到。在命令面板运行 `Remote Pulse: 配置状态栏指标` 可一次性勾选所有选项。",
   "config.statusBarMetrics.cpu.description": "CPU 使用率",
   "config.statusBarMetrics.memory.description": "内存使用率",
+  "config.statusBarMetrics.gpu.description": "仅第一张 GPU 的利用率(需要 nvidia-smi);全部 GPU 的详细信息仍然在趋势面板里能看到",
+  "config.statusBarMetrics.network.description": "上下行合计速率;分方向的详细数据仍然在趋势面板里能看到",
   "config.trendPanelSections.description": "趋势面板要展示哪些可选区块;System 和 Storage 始终展示。在命令面板运行\"Remote Pulse: 配置趋势面板板块\"可一次性勾选所有选项。",
   "config.trendPanelSections.markdownDescription": "趋势面板要展示哪些可选区块;System 和 Storage 始终展示。在命令面板运行 `Remote Pulse: 配置趋势面板板块` 可一次性勾选所有选项。",
   "config.trendPanelSections.network.description": "网络上下行速率,同时会作为一条线画进过去 30 分钟的图表",
