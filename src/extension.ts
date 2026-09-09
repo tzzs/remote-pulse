@@ -9,7 +9,7 @@ import { DockerCollector } from './collectors/docker';
 import { StatsStore } from './store/statsStore';
 import { Poller } from './scheduler';
 import { PulseStatusBar } from './statusBar';
-import { readConfig, isRemotePulseConfigChange, RemotePulseConfig } from './config';
+import { readConfig, isRemotePulseConfigChange, RemotePulseConfig, configureStatusBarMetrics, configureTrendPanelSections } from './config';
 import { CollectionState, Snapshot } from './types';
 import { HostInfo, TrendPanel, TrendPayload } from './webview/trendPanel';
 import { formatHostLabel } from './util/hostLabel';
@@ -140,12 +140,23 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     await Promise.all([lightPoller.runNow(), heavyPoller.runNow()]);
   });
 
+  const configureStatusBarMetricsCommand = vscode.commands.registerCommand(
+    'remotePulse.configureStatusBarMetrics',
+    configureStatusBarMetrics,
+  );
+  const configureTrendPanelSectionsCommand = vscode.commands.registerCommand(
+    'remotePulse.configureTrendPanelSections',
+    configureTrendPanelSections,
+  );
+
   context.subscriptions.push(
     statusBar,
     focusListener,
     configListener,
     showTrendCommand,
     refreshCommand,
+    configureStatusBarMetricsCommand,
+    configureTrendPanelSectionsCommand,
     lightPoller,
     heavyPoller,
   );

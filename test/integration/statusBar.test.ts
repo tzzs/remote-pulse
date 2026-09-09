@@ -28,11 +28,16 @@ function snapshotWith(overrides: Partial<Snapshot> = {}): Snapshot {
   };
 }
 
-// 测试宿主默认跑的是暗色主题(Dark Modern),这里就按暗色取值断言——和 src/store/statsStore.ts
-// 里 DARK_THEME_COLORS 的字面量保持一致,不经过任何主题 token 解析。
-const GREEN = '#23d18b';
-const YELLOW = '#f5f543';
-const RED = '#f14c4c';
+// 颜色现在走 VS Code 官方的 statusBarItem.warning*/error* 主题 token 而不是写死的十六进制值,
+// 所以断言的是 ThemeColor 的 id,不再依赖测试宿主具体跑的是哪套主题。
+const WARNING_FG = 'statusBarItem.warningForeground';
+const WARNING_BG = 'statusBarItem.warningBackground';
+const ERROR_FG = 'statusBarItem.errorForeground';
+const ERROR_BG = 'statusBarItem.errorBackground';
+
+function themeColorId(color: string | vscode.ThemeColor | undefined): string | undefined {
+  return color instanceof vscode.ThemeColor ? color.id : undefined;
+}
 
 suite('PulseStatusBar (integration)', () => {
   let bar: PulseStatusBar;
@@ -77,37 +82,44 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(bar.debugState.mem.visible, true);
   });
 
-  test('normal level colors the icon, CPU and memory green independently, as a fixed hex value (not a theme token)', () => {
+  test('normal level leaves color/backgroundColor unset, inheriting the theme default status bar foreground', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith(), baseConfig(), 'ok');
-    assert.equal(bar.debugState.icon.color, GREEN);
-    assert.equal(bar.debugState.cpu.color, GREEN);
-    assert.equal(bar.debugState.mem.color, GREEN);
+    assert.equal(bar.debugState.icon.color, undefined);
+    assert.equal(bar.debugState.cpu.color, undefined);
+    assert.equal(bar.debugState.mem.color, undefined);
+    assert.equal(bar.debugState.icon.backgroundColor, undefined);
+    assert.equal(bar.debugState.cpu.backgroundColor, undefined);
+    assert.equal(bar.debugState.mem.backgroundColor, undefined);
   });
 
-  test('CPU crossing warning colors only the CPU item and the icon yellow, memory stays green', () => {
+  test('CPU crossing warning colors only the CPU item and the icon with the warning theme token, memory stays unset', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith({ cpu: { percent: 85, cores: 4 } }), baseConfig(), 'ok');
-    assert.equal(bar.debugState.cpu.color, YELLOW);
-    assert.equal(bar.debugState.mem.color, GREEN);
-    assert.equal(bar.debugState.icon.color, YELLOW);
+    assert.equal(themeColorId(bar.debugState.cpu.color), WARNING_FG);
+    assert.equal(themeColorId(bar.debugState.cpu.backgroundColor), WARNING_BG);
+    assert.equal(bar.debugState.mem.color, undefined);
+    assert.equal(themeColorId(bar.debugState.icon.color), WARNING_FG);
+    assert.equal(themeColorId(bar.debugState.icon.backgroundColor), WARNING_BG);
   });
 
-  test('memory going critical alone colors only memory and the icon red, CPU stays green, and the icon glyph swaps to the warning triangle', () => {
+  test('memory going critical alone colors only memory and the icon with the error theme token, CPU stays unset, and the icon glyph swaps to the warning triangle', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith({ memory: { total: 100, used: 99, available: 1, percent: 99 } }), baseConfig(), 'ok');
-    assert.equal(bar.debugState.mem.color, RED);
-    assert.equal(bar.debugState.cpu.color, GREEN);
-    assert.equal(bar.debugState.icon.color, RED);
+    assert.equal(themeColorId(bar.debugState.mem.color), ERROR_FG);
+    assert.equal(themeColorId(bar.debugState.mem.backgroundColor), ERROR_BG);
+    assert.equal(bar.debugState.cpu.color, undefined);
+    assert.equal(themeColorId(bar.debugState.icon.color), ERROR_FG);
+    assert.equal(themeColorId(bar.debugState.icon.backgroundColor), ERROR_BG);
     assert.equal(bar.debugState.icon.text, '$(warning)');
   });
 
-  test('CPU critical and memory warning at once keep their own colors, icon follows the worse of the two', () => {
+  test('CPU critical and memory warning at once keep their own theme tokens, icon follows the worse of the two', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith({ cpu: { percent: 96, cores: 4 }, memory: { total: 100, used: 82, available: 18, percent: 82 } }), baseConfig(), 'ok');
-    assert.equal(bar.debugState.cpu.color, RED);
-    assert.equal(bar.debugState.mem.color, YELLOW);
-    assert.equal(bar.debugState.icon.color, RED);
+    assert.equal(themeColorId(bar.debugState.cpu.color), ERROR_FG);
+    assert.equal(themeColorId(bar.debugState.mem.color), WARNING_FG);
+    assert.equal(themeColorId(bar.debugState.icon.color), ERROR_FG);
   });
 
   test('has no tooltip, so hovering over the status bar items shows nothing', () => {
@@ -136,7 +148,7 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(bar.debugState.cpu.visible, true);
     assert.equal(bar.debugState.mem.visible, false);
     // 内存被隐藏,即使它已经严重超标,图标也只看 CPU(正常态),不该被隐藏的指标带偏。
-    assert.equal(bar.debugState.icon.color, GREEN);
+    assert.equal(bar.debugState.icon.color, undefined);
   });
 
   test('statusBarMetrics can hide CPU, leaving only memory visible', () => {

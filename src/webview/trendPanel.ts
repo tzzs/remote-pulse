@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { AlertLevel, CpuStats, DiskStats, DockerStats, GpuStats, MemoryStats, NetworkRate } from '../types';
 import { calcAlertLevel } from '../store/statsStore';
 import { formatBytes, formatRate, formatUptime } from '../util/sparkline';
+import { configureStatusBarMetrics, configureTrendPanelSections } from '../config';
 
 function nonce(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -85,6 +86,31 @@ interface PanelModel {
 }
 
 /**
+ * 齿轮按钮点的是"设置入口"而不是"直接跳设置页"——两个数组配置(状态栏指标/趋势面板板块)
+ * 在原生 Settings UI 里只有列表编辑器,不是一次性打勾的体验,所以把两个配置向导命令放在
+ * 菜单最前面,"打开设置(JSON/UI)"作为兜底选项留在最后。
+ */
+async function showSettingsMenu(): Promise<void> {
+  type Choice = { label: string; action: 'statusBar' | 'trendPanel' | 'settings' };
+  const items: Choice[] = [
+    { label: `$(checklist) ${vscode.l10n.t('Configure Status Bar Metrics…')}`, action: 'statusBar' },
+    { label: `$(checklist) ${vscode.l10n.t('Configure Trend Panel Sections…')}`, action: 'trendPanel' },
+    { label: `$(settings-gear) ${vscode.l10n.t('Open Settings (JSON/UI)')}`, action: 'settings' },
+  ];
+  const picked = await vscode.window.showQuickPick(items, { placeHolder: vscode.l10n.t('Remote Pulse Settings') });
+  if (!picked) {
+    return;
+  }
+  if (picked.action === 'statusBar') {
+    await configureStatusBarMetrics();
+  } else if (picked.action === 'trendPanel') {
+    await configureTrendPanelSections();
+  } else {
+    await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tanzz.remote-pulse');
+  }
+}
+
+/**
  * 趋势面板按需创建、按需销毁,不常驻内存(retainContextWhenHidden: false)。
  *
  * 外壳 HTML 只在创建时写一次,之后每轮采集用 postMessage 推数据、由 webview 就地改 DOM。
@@ -128,7 +154,7 @@ export class TrendPanel {
         if (message?.type === 'ready' && this.lastModel) {
           void this.panel.webview.postMessage({ type: 'model', model: this.lastModel });
         } else if (message?.type === 'openSettings') {
-          void vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tanzz.remote-pulse');
+          void showSettingsMenu();
         }
       },
       null,
@@ -305,7 +331,7 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
   return {
     host: { ...splitHostLabel(host.label), user: host.user },
     updated: vscode.l10n.t('Updated {0}', updatedAt),
-    settingsLabel: vscode.l10n.t('Open Remote Pulse Settings'),
+    settingsLabel: vscode.l10n.t('Remote Pulse Settings'),
     groups,
     series: {
       timestamps: series.timestamps,
@@ -523,13 +549,19 @@ const PANEL_SCRIPT = `
     return niceFrac * Math.pow(1024, i);
   }
 
+  // 之前这里画的是"圆圈 + 8 条从圆心向外的细直线",视觉上是个太阳/亮度图标而不是齿轮——
+  // 关键是齿的内缘要和外圈圆环有重叠(齿从半径 4.4 起,环带是 [2.8, 5.2]),两者才会连成
+  // 一个整体轮廓;之前齿的内缘在半径 5.2、环外缘只到 4.85,中间空了一圈缝,才会看着像太阳芒。
   function gearIcon() {
     const node = svg('svg', { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true' });
-    node.appendChild(svg('circle', { cx: 8, cy: 8, r: 2.8, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.2 }));
-    node.appendChild(svg('path', {
-      d: 'M8 1.4V2.8M8 13.2V14.6M14.6 8H13.2M2.8 8H1.4M12.66 3.34L11.66 4.34M4.34 11.66L3.34 12.66M12.66 12.66L11.66 11.66M4.34 4.34L3.34 3.34',
-      stroke: 'currentColor', 'stroke-width': 1.15, 'stroke-linecap': 'round',
-    }));
+    for (let i = 0; i < 8; i++) {
+      node.appendChild(svg('rect', {
+        x: 6.9, y: 1.2, width: 2.2, height: 2.4, rx: 0.5,
+        fill: 'currentColor', transform: 'rotate(' + (i * 45) + ' 8 8)',
+      }));
+    }
+    node.appendChild(svg('circle', { cx: 8, cy: 8, r: 4, fill: 'none', stroke: 'currentColor', 'stroke-width': 2.4 }));
+    node.appendChild(svg('circle', { cx: 8, cy: 8, r: 1.3, fill: 'none', stroke: 'currentColor', 'stroke-width': 0.9 }));
     return node;
   }
 

@@ -1,7 +1,31 @@
 import * as vscode from 'vscode';
 import { AlertLevel, CollectionState, Snapshot } from './types';
 import { RemotePulseConfig } from './config';
-import { calcAlertLevel, maxAlertLevel, foregroundColorFor } from './store/statsStore';
+import { calcAlertLevel, maxAlertLevel } from './store/statsStore';
+
+/**
+ * 之前用写死的十六进制色值(不经过主题 token),理由是主题可能把 charts.* / terminal.ansiBright*
+ * 重新定义成偏灰偏淡的取值。但这样做丢掉了主题系统真正解决的问题:Remote-SSH/WSL 会把整条
+ * 状态栏背景强制换色(常见的是深青绿色),写死的绿色文字("正常"态)在这种背景上对比度经
+ * 实测只有 ~2.4:1,远低于 WCAG 最低的 3:1——正是因为它和背景撞了色相,只是明暗不同。
+ *
+ * 现在换成 VS Code 官方为状态栏预留的 warning/error 主题 token 对(前景+背景成对出现,
+ * 主题作者写背景色时就会配套写足够对比度的前景色,这是平台保证,不是赌运气);
+ * "正常"态干脆不设色,让文字继承 statusBar.foreground——这个 token 天生保证与
+ * statusBar.background(包括被 Remote-SSH 改写后的版本)对比度达标。
+ * 代价是拿不到一个专属的"健康绿"背景块,因为 VS Code 没有对外暴露 successBackground token。
+ */
+function foregroundFor(level: AlertLevel): vscode.ThemeColor | undefined {
+  if (level === 'critical') return new vscode.ThemeColor('statusBarItem.errorForeground');
+  if (level === 'warning') return new vscode.ThemeColor('statusBarItem.warningForeground');
+  return undefined;
+}
+
+function backgroundFor(level: AlertLevel): vscode.ThemeColor | undefined {
+  if (level === 'critical') return new vscode.ThemeColor('statusBarItem.errorBackground');
+  if (level === 'warning') return new vscode.ThemeColor('statusBarItem.warningBackground');
+  return undefined;
+}
 
 const NORMAL_ICON = '$(pulse)';
 const CRITICAL_ICON = '$(warning)';
@@ -39,6 +63,7 @@ export class PulseStatusBar {
   showLoading(): void {
     this.iconItem.text = '$(sync~spin)';
     this.iconItem.color = undefined;
+    this.iconItem.backgroundColor = undefined;
     this.iconItem.show();
     this.cpuItem.hide();
     this.memItem.hide();
@@ -50,6 +75,7 @@ export class PulseStatusBar {
   showError(_reason: string): void {
     this.iconItem.text = '$(circle-slash)';
     this.iconItem.color = undefined;
+    this.iconItem.backgroundColor = undefined;
     this.iconItem.show();
     this.cpuItem.hide();
     this.memItem.hide();
@@ -89,12 +115,14 @@ export class PulseStatusBar {
     const memText = memPercent !== undefined ? String(Math.round(memPercent)).padStart(2, ' ') : '--';
 
     this.iconItem.text = overallLevel === 'critical' ? CRITICAL_ICON : NORMAL_ICON;
-    this.iconItem.color = this.colorFor(overallLevel);
+    this.iconItem.color = foregroundFor(overallLevel);
+    this.iconItem.backgroundColor = backgroundFor(overallLevel);
     this.iconItem.show();
 
     if (showCpu) {
       this.cpuItem.text = `CPU ${cpuText}%`;
-      this.cpuItem.color = this.colorFor(cpuLevel);
+      this.cpuItem.color = foregroundFor(cpuLevel);
+      this.cpuItem.backgroundColor = backgroundFor(cpuLevel);
       this.cpuItem.show();
       this.cpuVisible = true;
     } else {
@@ -104,20 +132,14 @@ export class PulseStatusBar {
 
     if (showMem) {
       this.memItem.text = `MEM ${memText}%`;
-      this.memItem.color = this.colorFor(memLevel);
+      this.memItem.color = foregroundFor(memLevel);
+      this.memItem.backgroundColor = backgroundFor(memLevel);
       this.memItem.show();
       this.memVisible = true;
     } else {
       this.memItem.hide();
       this.memVisible = false;
     }
-  }
-
-  /** 写死的十六进制色值不跟随主题——但深浅两套取值仍然要跟着亮/暗主题切换,否则浅色主题下深色变体会反而看不清。 */
-  private colorFor(level: AlertLevel): string {
-    const kind = vscode.window.activeColorTheme.kind;
-    const isLight = kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight;
-    return foregroundColorFor(level, isLight);
   }
 
   /** 仅供集成测试读取当前渲染状态用,不做其他用途。 */
