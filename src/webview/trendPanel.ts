@@ -18,12 +18,10 @@ export interface TrendSeries {
   cpu: number[];
   memory: number[];
   /**
-   * rx+tx 之和,已按窗口内峰值归一化到 0-100——网络速率没有 CPU/内存那种天然上限,
-   * 没法直接和它们共用 0-100% 的同一根 y 轴,只能相对自身峰值展示波动。
-   * 配合 networkPeakRate(单位 B/s)才能在图例/悬浮提示里还原出真实速率。
+   * rx+tx 之和,单位 B/s,原始值不做归一化——网络速率没有 CPU/内存那种天然的 0-100% 上限,
+   * 画图时走独立的右侧 y 轴(自己的量纲),而不是硬挤进 CPU/内存共用的百分比左轴。
    */
   network?: number[];
-  networkPeakRate?: number;
 }
 
 export interface TrendLatest {
@@ -83,7 +81,7 @@ interface PanelModel {
   updated: string;
   settingsLabel: string;
   groups: PanelGroup[];
-  series: { timestamps: number[]; cpu: number[]; memory: number[]; network?: number[]; networkPeakRate?: number };
+  series: { timestamps: number[]; cpu: number[]; memory: number[]; network?: number[] };
 }
 
 /**
@@ -314,7 +312,6 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
       cpu: series.cpu,
       memory: series.memory,
       network: series.network,
-      networkPeakRate: series.networkPeakRate,
     },
   };
 }
@@ -504,7 +501,7 @@ const PANEL_SCRIPT = `
     return node;
   }
 
-  /** 悬浮提示要把归一化后的网络线还原回真实速率——和 src/util/sparkline.ts 的 formatRate 同一套算法。 */
+  /** 悬浮提示/右侧轴标签里展示网络速率——和 src/util/sparkline.ts 的 formatRate 同一套算法。 */
   function formatRateJs(bytesPerSec) {
     if (!isFinite(bytesPerSec) || bytesPerSec < 0) return '0 B/s';
     var units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -512,6 +509,18 @@ const PANEL_SCRIPT = `
     var i = 0;
     while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
     return value.toFixed(i === 0 ? 0 : 1) + ' ' + units[i] + '/s';
+  }
+
+  /** 把窗口内的原始峰值撑到一个好看的刻度上限——按 1024 进制取整(1/2/5 阶梯),
+      这样轴标签显示出来才是整数的 KB/MB(比如 "2.0 MB/s"),跟 formatRateJs 的二进制单位对得上,
+      不会出现 "1.9 MB/s" 这种十进制取整后被二进制单位换算弄得不整的数。 */
+  function niceMax(raw) {
+    if (!isFinite(raw) || raw <= 0) return 1;
+    var i = 0;
+    var v = raw;
+    while (v >= 1024 && i < 4) { v /= 1024; i++; }
+    var niceFrac = v <= 1 ? 1 : v <= 2 ? 2 : v <= 5 ? 5 : 10;
+    return niceFrac * Math.pow(1024, i);
   }
 
   function gearIcon() {
@@ -738,11 +747,10 @@ const PANEL_SCRIPT = `
     if (chartTooltip) chartTooltip.style.display = 'none';
   }
 
-  /** CPU/内存本来就是 0-100 的百分比,直接显示;network 那条线是归一化过的,要用峰值速率换算回真实数值。 */
+  /** CPU/内存是 0-100 的百分比;network 是原始 B/s,走右轴自己的量纲,两者都不需要互相换算。 */
   function formatSeriesValue(def, value) {
     if (def.key === 'network') {
-      const peak = (chartData && chartData.networkPeakRate) || 0;
-      return formatRateJs((Math.max(0, Math.min(100, value)) / 100) * peak);
+      return formatRateJs(Math.max(0, value));
     }
     return Math.round(Math.max(0, Math.min(100, value))) + '%';
   }
@@ -790,8 +798,7 @@ const PANEL_SCRIPT = `
     const valuesAtIndex = chartData.series.map(function (s) { return s.vals[nearest]; });
     let minY = Infinity;
     for (let i = 0; i < chartData.series.length; i++) {
-      const v = valuesAtIndex[i];
-      const y = chartData.top + (1 - Math.max(0, Math.min(100, v)) / 100) * chartData.plotH;
+      const y = toY(valuesAtIndex[i], chartData.series[i].domain, chartData.top, chartData.plotH);
       const dot = chartDots[i];
       dot.setAttribute('cx', x);
       dot.setAttribute('cy', y);
@@ -843,6 +850,13 @@ const PANEL_SCRIPT = `
     return [];
   }
 
+  /** cpu/memory 都是 0-100% 的左轴;network 走自己的右轴量纲(domain.max 由 niceMax() 决定)。 */
+  function toY(value, domain, top, plotH) {
+    const v = Math.max(domain.min, Math.min(domain.max, value));
+    const range = domain.max - domain.min || 1;
+    return top + (1 - (v - domain.min) / range) * plotH;
+  }
+
   function drawChart(series) {
     if (!chartEl) return;
     const hasData = series.cpu.length > 1 || series.memory.length > 1;
@@ -865,22 +879,15 @@ const PANEL_SCRIPT = `
     chartEl.setAttribute('height', String(height));
     chartEl.replaceChildren();
 
-    for (let k = 0; k <= 4; k++) {
-      const y = top + (plotH / 4) * k + 0.5;
-      chartEl.appendChild(svg('line', { class: 'grid', x1: gutter, y1: y, x2: width, y2: y, 'shape-rendering': 'crispEdges' }));
-    }
-    const marks = [[top, '100%'], [top + plotH / 2, '50%'], [top + plotH, '0%']];
-    for (const mark of marks) {
-      const label = svg('text', { class: 'axis', x: gutter - 8, y: mark[0], 'text-anchor': 'end', 'dominant-baseline': 'middle' });
-      label.textContent = mark[1];
-      chartEl.appendChild(label);
-    }
-
-    // 末端圆点的圆心如果落在 x = width(viewBox 的右边界)上,半径里有一半必然被 svg 视口裁掉——
-    // 之前就是这样,右侧留一点安全边距,圆点画在边界内侧而不是正好卡在边界上。
+    // network 走独立的右侧 y 轴(自己的量纲,不是百分比)——右边多留出画刻度文字的空间;
+    // 末端圆点的圆心如果落在视口边界上,半径里有一半会被裁掉,rightPad 同时兜住这个安全边距。
+    const hasNetworkAxis = chartActiveDefs.some(function (def) { return def.key === 'network'; });
     const endDotRadius = 2.5;
-    const rightPad = 5;
-    const span = width - gutter - rightPad;
+    // 最长的右轴标签("1023.9 KB/s"这类进位前的边界值)在 11px 字号下量出来约 66px 宽,
+    // 78 留了安全余量——字号不随窄屏缩小,所以窄屏也不能比宽屏少留。
+    const rightPad = hasNetworkAxis ? 78 : 5;
+    const plotRight = width - rightPad;
+    const span = plotRight - gutter;
     const maxPoints = Math.max(2, Math.floor(span / 3));
     const times = downsample(series.timestamps, maxPoints);
     const downsampled = chartActiveDefs.map(function (def) { return downsample(valuesFor(def.key, series), maxPoints); });
@@ -888,23 +895,51 @@ const PANEL_SCRIPT = `
     const xs = [];
     for (let i = 0; i < count; i++) xs.push(gutter + (span * i) / (count - 1));
 
-    function line(values, className, colorVar) {
+    // cpu/memory 共用左轴的 0-100% 量纲;network 没有天然上限,按这一屏数据的峰值取整成
+    // 好看的刻度上限(niceMax),画在右轴上——两根轴各管各的,线不会因为量纲不同而挤在一起。
+    const domains = chartActiveDefs.map(function (def, i) {
+      if (def.key === 'network') {
+        const raw = downsampled[i].length ? Math.max.apply(null, downsampled[i]) : 0;
+        return { min: 0, max: niceMax(raw) };
+      }
+      return { min: 0, max: 100 };
+    });
+
+    for (let k = 0; k <= 4; k++) {
+      const y = top + (plotH / 4) * k + 0.5;
+      chartEl.appendChild(svg('line', { class: 'grid', x1: gutter, y1: y, x2: plotRight, y2: y, 'shape-rendering': 'crispEdges' }));
+    }
+    const leftMarks = [[top, '100%'], [top + plotH / 2, '50%'], [top + plotH, '0%']];
+    for (const mark of leftMarks) {
+      const label = svg('text', { class: 'axis', x: gutter - 8, y: mark[0], 'text-anchor': 'end', 'dominant-baseline': 'middle' });
+      label.textContent = mark[1];
+      chartEl.appendChild(label);
+    }
+    if (hasNetworkAxis) {
+      const netDomain = domains[chartActiveDefs.map(function (d) { return d.key; }).indexOf('network')];
+      const rightMarks = [[top, netDomain.max], [top + plotH / 2, netDomain.max / 2], [top + plotH, 0]];
+      for (const mark of rightMarks) {
+        const label = svg('text', { class: 'axis', x: plotRight + 8, y: mark[0], 'text-anchor': 'start', 'dominant-baseline': 'middle' });
+        label.textContent = formatRateJs(mark[1]);
+        chartEl.appendChild(label);
+      }
+    }
+
+    function line(values, className, colorVar, domain) {
       if (values.length < 2) return;
       let points = '';
       for (let i = 0; i < values.length; i++) {
-        const v = Math.max(0, Math.min(100, values[i]));
-        const y = top + (1 - v / 100) * plotH;
+        const y = toY(values[i], domain, top, plotH);
         points += (i ? ' ' : '') + xs[i].toFixed(1) + ',' + y.toFixed(1);
       }
       chartEl.appendChild(svg('polyline', { class: className, points: points }));
-      const last = Math.max(0, Math.min(100, values[values.length - 1]));
       chartEl.appendChild(svg('circle', {
-        cx: xs[xs.length - 1], cy: top + (1 - last / 100) * plotH, r: endDotRadius, fill: colorVar,
+        cx: xs[xs.length - 1], cy: toY(values[values.length - 1], domain, top, plotH), r: endDotRadius, fill: colorVar,
       }));
     }
     // 倒序画(network、memory、cpu):cpu 最受关注,压在最上层不被其他线盖住。
     for (let i = chartActiveDefs.length - 1; i >= 0; i--) {
-      line(downsampled[i], chartActiveDefs[i].className, chartActiveDefs[i].colorVar);
+      line(downsampled[i], chartActiveDefs[i].className, chartActiveDefs[i].colorVar, domains[i]);
     }
 
     // 悬浮的十字线和每条线各一个圆点:默认透明(见 CSS .guide/.hover-dot),指针移动时才显形。
@@ -918,11 +953,10 @@ const PANEL_SCRIPT = `
 
     chartData = {
       xs: xs,
-      series: chartActiveDefs.map(function (def, i) { return { key: def.key, vals: downsampled[i] }; }),
+      series: chartActiveDefs.map(function (def, i) { return { key: def.key, vals: downsampled[i], domain: domains[i] }; }),
       times: times,
       top: top,
       plotH: plotH,
-      networkPeakRate: series.networkPeakRate,
     };
 
     // 每轮采集都会重建以上这些元素:鼠标没动的话,在同一位置立刻把悬浮指示器画回去,

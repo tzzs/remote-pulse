@@ -218,17 +218,9 @@ function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendP
   const windowed = history.filter(s => s.timestamp >= cutoff);
   const latestSnapshot = store.latest();
   const showNetwork = config.trendPanelSections.includes('network');
-
-  let network: number[] | undefined;
-  let networkPeakRate: number | undefined;
-  if (showNetwork) {
-    // 网络速率没有 CPU/内存那种天然的 0-100 上限,没法直接跟它们共用同一根 y 轴——
-    // 归一化到"这 30 分钟窗口里的自身峰值"上,图表看的是相对波动,峰值随窗口滚动会变,
-    // 原始速率数值仍然通过 networkPeakRate 还原,展示在图例和悬浮提示里。
-    const totals = windowed.map(s => (s.network ? s.network.rxRate + s.network.txRate : 0));
-    networkPeakRate = Math.max(1, ...totals);
-    network = totals.map(v => (v / (networkPeakRate as number)) * 100);
-  }
+  // rx+tx 之和,原始 B/s——不做归一化,趋势面板画在自己独立的右侧 y 轴上,
+  // 不用挤进 CPU/内存共用的 0-100% 左轴。
+  const network = showNetwork ? windowed.map(s => (s.network ? s.network.rxRate + s.network.txRate : 0)) : undefined;
 
   return {
     series: {
@@ -236,7 +228,6 @@ function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendP
       cpu: windowed.map(s => s.cpu?.percent ?? 0),
       memory: windowed.map(s => s.memory?.percent ?? 0),
       network,
-      networkPeakRate,
     },
     latest: latestSnapshot && {
       cpu: latestSnapshot.cpu,
