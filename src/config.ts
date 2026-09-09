@@ -1,21 +1,23 @@
 import * as vscode from 'vscode';
 
+export type StatusBarMetric = 'cpu' | 'memory';
+export type TrendPanelSection = 'network' | 'gpu' | 'docker';
+
 export interface RemotePulseConfig {
   refreshInterval: number;
   backgroundInterval: number;
   heavyMetricInterval: number;
-  statusBarMetric: 'cpu' | 'memory';
   warningThreshold: number;
   criticalThreshold: number;
-  template: string;
-  enableGpu: boolean;
-  enableDocker: boolean;
-  enableNetwork: boolean;
+  statusBarMetrics: StatusBarMetric[];
+  trendPanelSections: TrendPanelSection[];
   enableNotifications: boolean;
   diskMountPoints: string[];
 }
 
 const SECTION = 'remotePulse';
+const DEFAULT_STATUS_BAR_METRICS: StatusBarMetric[] = ['cpu', 'memory'];
+const DEFAULT_TREND_PANEL_SECTIONS: TrendPanelSection[] = ['gpu', 'docker'];
 
 export function readConfig(): RemotePulseConfig {
   const cfg = vscode.workspace.getConfiguration(SECTION);
@@ -23,13 +25,10 @@ export function readConfig(): RemotePulseConfig {
     refreshInterval: cfg.get<number>('refreshInterval', 2000),
     backgroundInterval: cfg.get<number>('backgroundInterval', 15000),
     heavyMetricInterval: cfg.get<number>('heavyMetricInterval', 10000),
-    statusBarMetric: cfg.get<'cpu' | 'memory'>('statusBarMetric', 'cpu'),
     warningThreshold: cfg.get<number>('warningThreshold', 80),
     criticalThreshold: cfg.get<number>('criticalThreshold', 95),
-    template: cfg.get<string>('template', '$(pulse) ${value}%'),
-    enableGpu: cfg.get<boolean>('enableGpu', true),
-    enableDocker: cfg.get<boolean>('enableDocker', true),
-    enableNetwork: cfg.get<boolean>('enableNetwork', false),
+    statusBarMetrics: cfg.get<StatusBarMetric[]>('statusBarMetrics', DEFAULT_STATUS_BAR_METRICS),
+    trendPanelSections: cfg.get<TrendPanelSection[]>('trendPanelSections', DEFAULT_TREND_PANEL_SECTIONS),
     enableNotifications: cfg.get<boolean>('enableNotifications', false),
     diskMountPoints: cfg.get<string[]>('diskMountPoints', []),
   };

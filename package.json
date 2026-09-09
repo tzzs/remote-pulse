@@ -72,15 +72,6 @@
           "minimum": 2000,
           "description": "%config.heavyMetricInterval.description%"
         },
-        "remotePulse.statusBarMetric": {
-          "type": "string",
-          "enum": [
-            "cpu",
-            "memory"
-          ],
-          "default": "cpu",
-          "description": "%config.statusBarMetric.description%"
-        },
         "remotePulse.warningThreshold": {
           "type": "number",
           "default": 80,
@@ -95,25 +86,31 @@
           "maximum": 100,
           "description": "%config.criticalThreshold.description%"
         },
-        "remotePulse.template": {
-          "type": "string",
-          "default": "$(pulse) ${value}%",
-          "description": "%config.template.description%"
+        "remotePulse.statusBarMetrics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["cpu", "memory"],
+            "enumDescriptions": ["%config.statusBarMetrics.cpu.description%", "%config.statusBarMetrics.memory.description%"]
+          },
+          "uniqueItems": true,
+          "default": ["cpu", "memory"],
+          "description": "%config.statusBarMetrics.description%"
         },
-        "remotePulse.enableGpu": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.enableGpu.description%"
-        },
-        "remotePulse.enableDocker": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.enableDocker.description%"
-        },
-        "remotePulse.enableNetwork": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.enableNetwork.description%"
+        "remotePulse.trendPanelSections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["network", "gpu", "docker"],
+            "enumDescriptions": [
+              "%config.trendPanelSections.network.description%",
+              "%config.trendPanelSections.gpu.description%",
+              "%config.trendPanelSections.docker.description%"
+            ]
+          },
+          "uniqueItems": true,
+          "default": ["gpu", "docker"],
+          "description": "%config.trendPanelSections.description%"
         },
         "remotePulse.enableNotifications": {
           "type": "boolean",
@@ -135,14 +132,21 @@
     "vscode:prepublish": "npm run build",
     "build": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run build && tsc -p ./test/tsconfig.test.json",
+    "compile:tests": "tsc -p ./test/tsconfig.test.json",
+    "pretest": "npm run build && npm run compile:tests",
     "test": "node --test out-test/test/*.test.js",
+    "pretest:integration": "npm run build && npm run compile:tests",
+    "test:integration": "vscode-test",
     "package": "vsce package"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.85.0",
-    "typescript": "^5.5.4",
-    "@vscode/vsce": "^3.0.0"
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.0.0",
+    "mocha": "^12.0.0",
+    "typescript": "^5.5.4"
   }
 }

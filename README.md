@@ -14,8 +14,8 @@ Most similar extensions just move a full dashboard into the status bar: dense, a
 
 | Aspect | Common approach elsewhere | Remote Pulse |
 |---|---|---|
-| Always-on footprint | CPU\|MEM\|DISK all shown flat | Just 1 icon + 1 core number by default; everything else lives in the tooltip |
-| Visual tone | Value-driven coloring at all times | Neutral by default; only colors up when a threshold is crossed |
+| Always-on footprint | CPU\|MEM\|DISK all shown flat | Just 1 icon + 1 core number by default; everything else lives in the trend panel |
+| Visual tone | Value-driven coloring at all times | CPU and memory each colored on a green/yellow/red scale, independently of each other — the same visual language as VS Code's own remote-connection indicator |
 | Interaction | Some require opening a sidebar | Click to pop a lightweight Webview — no persistent space used, no trace left after closing |
 | Resource cost | Some poll via spawned subprocesses | Reads `/proc` directly; zero steady-state subprocess overhead for core metrics |
 | Context awareness | Polls at the same rate whether focused or not | Automatically throttles when the window loses focus |
@@ -23,34 +23,25 @@ Most similar extensions just move a full dashboard into the status bar: dense, a
 ## Preview
 
 ```
-Default: $(pulse) 23%
-Alert:   $(warning) 92%   ← status bar background turns warning/critical color
+$(pulse) CPU 23%  MEM 61%    ← all normal, colored green
+$(pulse) CPU 85%  MEM 40%    ← CPU alone crosses warning, turns yellow — memory stays green
+$(warning) CPU 28%  MEM 97%  ← memory alone goes critical, turns red — the icon follows the worse of the two
 ```
 
-Hover to expand the tooltip:
+CPU and memory are two independently colored status bar items, plus a shared icon that always reflects whichever of the two is worse — the same green/yellow/red language VS Code's own remote-connection indicator uses. The colors are fixed (not a theme color), so they stay equally visible no matter what the status bar's actual background happens to be.
 
-```
-Remote host: dev-gpu-01 (192.168.x.x)
-─────────────────────
-CPU     ▁▃▅▇▆▄▂  23%  (8 cores)
-Memory  ▂▂▃▄▄▃▂  61%  (9.8G / 16G)
-Uptime  12d 4h
-─────────────────────
-Click to view the trend chart
-```
-
-Click the status bar item to open a line chart of the last 30 minutes of CPU/memory history (a Webview that's destroyed on close — nothing stays resident in memory).
+Click any of the three items — or run `Remote Pulse: Show Trend Chart` — to open a line chart of the last 30 minutes of CPU/memory history, plus disk/network/GPU/Docker detail (a Webview that's destroyed on close — nothing stays resident in memory). A gear icon in the panel header opens this extension's settings directly.
 
 ## Features
 
 - **CPU**: overall usage and core count (delta-based `/proc/stat` calculation, not loadavg)
 - **Memory**: usage percentage and used/total (uses `MemAvailable` rather than `MemFree`, which better reflects what's actually available)
 - **Disk**: per-mount-point usage (virtual filesystems are filtered out automatically; shows the top 3 by usage by default, or specify mount points manually)
-- **Network**: upload/download rate (disabled by default to keep the tooltip uncluttered)
+- **Network**: upload/download rate, optionally plotted as a third line in the 30-minute chart (normalized to the window's own peak, since it has no natural 0-100% scale like CPU/memory); off by default to keep the trend panel uncluttered
 - **GPU**: VRAM usage, utilization, temperature (requires `nvidia-smi`; the module simply stays inactive if it's unavailable)
 - **Docker**: running container count plus per-container CPU/memory usage (requires access to `/var/run/docker.sock`; degrades silently without permission)
-- **Threshold alerts**: the status bar changes color when CPU/memory crosses a threshold, with an optional system notification (fires once per crossing into the critical state, so it won't spam you)
-- **History trend**: a tooltip sparkline plus a Webview line chart on click
+- **Threshold alerts**: CPU and memory each turn green/yellow/red independently as they cross the warning/critical thresholds, with an optional system notification (fires once per crossing into the critical state, so it won't spam you)
+- **History trend**: a Webview line chart of the last 30 minutes
 - **Adaptive polling**: automatically throttles once the window loses focus, reducing load on the remote machine
 - **Localized UI**: commands, settings, and the status bar/webview text follow VS Code's display language (English by default, with a 简体中文 translation)
 
@@ -77,13 +68,10 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 | `remotePulse.refreshInterval` | `2000` | Refresh interval for high-frequency foreground metrics (CPU/memory), in ms |
 | `remotePulse.backgroundInterval` | `15000` | Throttled refresh interval once the window loses focus, in ms |
 | `remotePulse.heavyMetricInterval` | `10000` | Independent polling interval for low-frequency metrics like GPU/Docker, in ms |
-| `remotePulse.statusBarMetric` | `cpu` | Primary metric shown in the status bar: `cpu` \| `memory` |
 | `remotePulse.warningThreshold` | `80` | Warning threshold (%) |
 | `remotePulse.criticalThreshold` | `95` | Critical threshold (%) |
-| `remotePulse.template` | `"$(pulse) ${value}%"` | Status bar display template |
-| `remotePulse.enableGpu` | `true` | Whether to detect and show GPU info |
-| `remotePulse.enableDocker` | `true` | Whether to detect and show Docker container info |
-| `remotePulse.enableNetwork` | `false` | Whether to show network upload/download rate |
+| `remotePulse.statusBarMetrics` | `["cpu", "memory"]` | Which metrics to show as status bar items (checkboxes in the Settings UI); unchecked metrics still appear in the trend panel |
+| `remotePulse.trendPanelSections` | `["gpu", "docker"]` | Which optional sections to show in the trend panel (checkboxes); System and Storage are always shown. Enabling `network` also plots it as a line in the 30-minute chart |
 | `remotePulse.enableNotifications` | `false` | Whether to show a system notification when the critical threshold is crossed |
 | `remotePulse.diskMountPoints` | `[]` | Mount points to monitor; leave empty to auto-select the top 3 by usage |
 
@@ -96,7 +84,7 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 
 - **Non-Linux remote hosts**: CPU/memory automatically fall back to Node.js's `os` module (slightly less precise); the network module is hidden entirely since there's no cross-platform equivalent
 - **First connection**: the status bar initially shows a `$(sync~spin)` loading state
-- **Collection failure** (permissions / network flakiness): shows `$(circle-slash)`, with the reason explained in the tooltip — no intrusive error notifications
+- **Collection failure** (permissions / network flakiness): shows `$(circle-slash)` — no intrusive error notifications
 - **GPU/Docker unavailable**: probed once at startup; if missing or unauthorized, the module simply stays inactive rather than retrying repeatedly
 
 ## Development
@@ -105,6 +93,7 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 npm install
 npm run build     # compile with tsc into out/
 npm test          # build, then run the unit tests under test/ (node:test)
+npm run test:integration  # runs test/integration/ in a real VS Code extension host (@vscode/test-cli)
 npm run package   # vsce package to produce a .vsix
 ```
 
@@ -112,13 +101,24 @@ Open this project in VS Code and press `F5` to launch an Extension Development H
 
 ## CI / Release Pipeline
 
-The repository has three workflows configured (`.github/workflows/`):
+The repository has four workflows configured (`.github/workflows/`):
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | Every push/PR to `main` | `npm ci` → build → unit tests → `vsce package` smoke check |
+| `ci.yml` | Every push/PR to `main` | `npm ci` → build → unit tests → integration tests (real VS Code extension host) → `vsce package` → uploads the `.vsix` as a workflow artifact, publishes it as a `pr-<N>` prerelease, and comments a one-line install command on the PR |
+| `pr-cleanup.yml` | A PR is closed | Deletes that PR's `pr-<N>` prerelease and tag so test builds don't pile up in the Releases list |
 | `release-please.yml` | Push to `main` | Maintains a "Release PR" automatically based on [Conventional Commits](https://www.conventionalcommits.org/) messages (bumps the `package.json` version + `CHANGELOG.md`); merging it automatically tags a version and creates a GitHub Release |
-| `publish.yml` | A GitHub Release is published (`release: published`) | Build → test → package the `.vsix` → attach it to the Release → publish to the VS Code Marketplace (`vsce publish`) and Open VSX (`ovsx publish`) |
+| `publish.yml` | A GitHub Release is published (`release: published`), skipped for prereleases | Build → test → package the `.vsix` → attach it to the Release → publish to the VS Code Marketplace (`vsce publish`) and Open VSX (`ovsx publish`) |
+
+### Grabbing a PR's test build
+
+Every PR gets a comment with a ready-to-run install command, e.g.:
+
+```bash
+curl -fL -o remote-pulse-pr-8.vsix "https://github.com/tzzs/remote-pulse/releases/download/pr-8/remote-pulse-pr-8.vsix" && code --install-extension remote-pulse-pr-8.vsix
+```
+
+That build is a GitHub Release marked as a prerelease (not the "Latest" one — that stays whatever release-please last cut), gets overwritten on every push to the PR, and is deleted automatically once the PR closes.
 
 In short, the full pipeline is: **everyday commits follow Conventional Commits (`feat: xxx` / `fix: xxx` / `chore: xxx`, …) → release-please opens a version PR → merging it cuts a GitHub Release automatically → that automatically pushes to both marketplaces**.
 

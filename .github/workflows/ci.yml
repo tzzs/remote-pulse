@@ -7,7 +7,8 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
   test:
@@ -28,5 +29,90 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: Package .vsix (sanity check)
+      - name: Integration tests (real VS Code extension host)
+        run: xvfb-run -a npm run test:integration
+
+      - name: Package .vsix
         run: npx @vscode/vsce package --no-yarn
+
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-pulse-vsix
+          path: '*.vsix'
+          retention-days: 14
+
+      # Actions artifacts always download as a zip and need repo-collaborator auth to fetch.
+      # A prerelease's assets are plain files with a public, unauthenticated URL, so this is
+      # what makes a one-line `curl | code --install-extension` command possible below.
+      - name: Publish test build as a prerelease
+        id: prbuild
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          TAG="pr-$PR_NUMBER"
+          ASSET_NAME="remote-pulse-pr-$PR_NUMBER.vsix"
+          cp ./*.vsix "./$ASSET_NAME"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" "./$ASSET_NAME" --clobber --repo "${{ github.repository }}"
+          else
+            gh release create "$TAG" "./$ASSET_NAME" \
+              --repo "${{ github.repository }}" \
+              --prerelease \
+              --title "PR #$PR_NUMBER test build" \
+              --notes "Automated test build of #$PR_NUMBER (commit ${{ github.sha }}). Not a real release — for manual testing only, overwritten on every push to this PR."
+          fi
+          echo "asset_url=https://github.com/${{ github.repository }}/releases/download/$TAG/$ASSET_NAME" >> "$GITHUB_OUTPUT"
+          echo "asset_name=$ASSET_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Comment PR with the install command
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- remote-pulse-vsix-artifact -->';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const assetUrl = `${{ steps.prbuild.outputs.asset_url }}`;
+            const assetName = `${{ steps.prbuild.outputs.asset_name }}`;
+
+            const lines = [marker, '📦 A test build of this PR is ready.', ''];
+            if (assetUrl) {
+              lines.push(
+                'Install it with one command:',
+                '```bash',
+                `curl -fL -o ${assetName} "${assetUrl}" && code --install-extension ${assetName}`,
+                '```',
+                '',
+                `Or [download the .vsix directly](${assetUrl}) and use the Extensions view → **Install from VSIX...**. This build is overwritten on every push to this PR and removed once it's closed.`,
+              );
+            } else {
+              lines.push(
+                `[Open this workflow run](${runUrl}) and download \`remote-pulse-vsix\` under **Artifacts** at the bottom of the summary page (kept for 14 days, comes as a zip), then install via the Extensions view → **Install from VSIX...**.`,
+              );
+            }
+            const body = lines.join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

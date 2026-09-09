@@ -1,136 +1,164 @@
 import * as vscode from 'vscode';
 import { AlertLevel, CollectionState, Snapshot } from './types';
 import { RemotePulseConfig } from './config';
-import { calcAlertLevel } from './store/statsStore';
-import { renderSparkline, formatBytes, formatRate, formatUptime } from './util/sparkline';
+import { calcAlertLevel, maxAlertLevel, foregroundColorFor } from './store/statsStore';
 
+const NORMAL_ICON = '$(pulse)';
+const CRITICAL_ICON = '$(warning)';
+
+/** 状态栏本身最多只显示 CPU/内存两个数字(可通过 statusBarMetrics 单独隐藏其中一个),其余指标全部在趋势面板里——点击是进入面板的唯一入口。 */
 const SHOW_TREND_COMMAND = 'remotePulse.showTrend';
 
+/** 单个 StatusBarItem 只能有一种颜色,CPU 和内存要各自独立变色,图标还要反映两者里更严重的一个——
+ * 所以拆成三个相邻的项而不是一条拼接文本,和 VS Code 自带的多段状态栏组合(比如 Git 分支+同步)是同一种做法。 */
 export class PulseStatusBar {
-  private readonly item: vscode.StatusBarItem;
+  private readonly iconItem: vscode.StatusBarItem;
+  private readonly cpuItem: vscode.StatusBarItem;
+  private readonly memItem: vscode.StatusBarItem;
+  /** vscode.StatusBarItem 不暴露"当前是否可见"的读取接口,自己记一份供调试状态用。 */
+  private cpuVisible = false;
+  private memVisible = false;
 
   constructor() {
-    this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.item.name = 'Remote Pulse';
-    this.item.command = SHOW_TREND_COMMAND;
-    this.item.text = '$(sync~spin)';
-    this.item.tooltip = vscode.l10n.t('Collecting remote host status…');
-    this.item.show();
+    this.iconItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
+    this.iconItem.name = 'Remote Pulse: Alert';
+    this.iconItem.command = SHOW_TREND_COMMAND;
+
+    this.cpuItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 999);
+    this.cpuItem.name = 'Remote Pulse: CPU';
+    this.cpuItem.command = SHOW_TREND_COMMAND;
+
+    this.memItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 998);
+    this.memItem.name = 'Remote Pulse: Memory';
+    this.memItem.command = SHOW_TREND_COMMAND;
+
+    this.showLoading();
+    this.iconItem.show();
   }
 
   showLoading(): void {
-    this.item.text = '$(sync~spin)';
-    this.item.tooltip = vscode.l10n.t('Collecting remote host status…');
-    this.item.backgroundColor = undefined;
+    this.iconItem.text = '$(sync~spin)';
+    this.iconItem.color = undefined;
+    this.iconItem.show();
+    this.cpuItem.hide();
+    this.memItem.hide();
+    this.cpuVisible = false;
+    this.memVisible = false;
   }
 
-  /** 采集失败(权限/网络抖动)时静默降级,不弹烦人的错误通知,只在 tooltip 里说明原因。 */
-  showError(reason: string): void {
-    this.item.text = '$(circle-slash)';
-    this.item.tooltip = new vscode.MarkdownString(vscode.l10n.t('Collection failed: {0}', reason));
-    this.item.backgroundColor = undefined;
+  /** 采集失败(权限/网络抖动)时静默降级,不弹烦人的错误通知。 */
+  showError(_reason: string): void {
+    this.iconItem.text = '$(circle-slash)';
+    this.iconItem.color = undefined;
+    this.iconItem.show();
+    this.cpuItem.hide();
+    this.memItem.hide();
+    this.cpuVisible = false;
+    this.memVisible = false;
   }
 
-  update(
-    hostLabel: string,
-    snapshot: Snapshot,
-    config: RemotePulseConfig,
-    state: CollectionState,
-    sparklines: { cpu: number[]; memory: number[] } = { cpu: [], memory: [] },
-  ): void {
+  update(snapshot: Snapshot, config: RemotePulseConfig, state: CollectionState): void {
     if (state === 'loading') {
       this.showLoading();
       return;
     }
 
-    const primaryPercent = this.pickPrimaryPercent(snapshot, config);
-    if (primaryPercent === undefined) {
+    const cpuPercent = snapshot.cpu?.percent;
+    const memPercent = snapshot.memory?.percent;
+    if (cpuPercent === undefined && memPercent === undefined) {
       this.showLoading();
       return;
     }
 
-    const level = calcAlertLevel(primaryPercent, config.warningThreshold, config.criticalThreshold);
-    const paddedValue = String(Math.round(primaryPercent)).padStart(2, ' ');
+    const showCpu = config.statusBarMetrics.includes('cpu');
+    const showMem = config.statusBarMetrics.includes('memory');
 
-    let text = config.template.replace('${value}', paddedValue);
-    if (level === 'critical') {
-      text = text.replace(/^\$\([a-zA-Z-]+\)/, '$(warning)');
+    const cpuLevel = cpuPercent !== undefined ? calcAlertLevel(cpuPercent, config.warningThreshold, config.criticalThreshold) : 'normal';
+    const memLevel = memPercent !== undefined ? calcAlertLevel(memPercent, config.warningThreshold, config.criticalThreshold) : 'normal';
+    // 图标只反映用户实际勾选展示的那些指标——隐藏掉的指标即使越阈值,也不该影响图标颜色。
+    const consideredLevels: AlertLevel[] = [];
+    if (showCpu) {
+      consideredLevels.push(cpuLevel);
     }
-    this.item.text = text;
-    this.item.backgroundColor = this.backgroundColorFor(level);
-    this.item.tooltip = this.buildTooltip(hostLabel, snapshot, config, sparklines);
+    if (showMem) {
+      consideredLevels.push(memLevel);
+    }
+    const overallLevel = maxAlertLevel(...consideredLevels);
+
+    const cpuText = cpuPercent !== undefined ? String(Math.round(cpuPercent)).padStart(2, ' ') : '--';
+    const memText = memPercent !== undefined ? String(Math.round(memPercent)).padStart(2, ' ') : '--';
+
+    this.iconItem.text = overallLevel === 'critical' ? CRITICAL_ICON : NORMAL_ICON;
+    this.iconItem.color = this.colorFor(overallLevel);
+    this.iconItem.show();
+
+    if (showCpu) {
+      this.cpuItem.text = `CPU ${cpuText}%`;
+      this.cpuItem.color = this.colorFor(cpuLevel);
+      this.cpuItem.show();
+      this.cpuVisible = true;
+    } else {
+      this.cpuItem.hide();
+      this.cpuVisible = false;
+    }
+
+    if (showMem) {
+      this.memItem.text = `MEM ${memText}%`;
+      this.memItem.color = this.colorFor(memLevel);
+      this.memItem.show();
+      this.memVisible = true;
+    } else {
+      this.memItem.hide();
+      this.memVisible = false;
+    }
   }
 
-  private backgroundColorFor(level: AlertLevel): vscode.ThemeColor | undefined {
-    if (level === 'critical') {
-      return new vscode.ThemeColor('statusBarItem.errorBackground');
-    }
-    if (level === 'warning') {
-      return new vscode.ThemeColor('statusBarItem.warningBackground');
-    }
-    return undefined;
+  /** 写死的十六进制色值不跟随主题——但深浅两套取值仍然要跟着亮/暗主题切换,否则浅色主题下深色变体会反而看不清。 */
+  private colorFor(level: AlertLevel): string {
+    const kind = vscode.window.activeColorTheme.kind;
+    const isLight = kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight;
+    return foregroundColorFor(level, isLight);
   }
 
-  private pickPrimaryPercent(snapshot: Snapshot, config: RemotePulseConfig): number | undefined {
-    if (config.statusBarMetric === 'memory') {
-      return snapshot.memory?.percent;
-    }
-    return snapshot.cpu?.percent;
-  }
-
-  private buildTooltip(
-    hostLabel: string,
-    snapshot: Snapshot,
-    config: RemotePulseConfig,
-    sparklines: { cpu: number[]; memory: number[] },
-  ): vscode.MarkdownString {
-    const lines: string[] = [];
-    lines.push(`**${vscode.l10n.t('Remote host: {0}', hostLabel)}**`, '');
-
-    if (snapshot.cpu) {
-      const cpuSpark = renderSparkline(sparklines.cpu.length > 0 ? sparklines.cpu : [snapshot.cpu.percent]);
-      lines.push(`CPU  ${cpuSpark} ${Math.round(snapshot.cpu.percent)}%  (${vscode.l10n.t('{0} cores', snapshot.cpu.cores)})`);
-    }
-    if (snapshot.memory) {
-      const memSpark = renderSparkline(sparklines.memory.length > 0 ? sparklines.memory : [snapshot.memory.percent]);
-      lines.push(
-        `${vscode.l10n.t('Memory')}  ${memSpark} ${Math.round(snapshot.memory.percent)}%  (${formatBytes(snapshot.memory.used)} / ${formatBytes(snapshot.memory.total)})`,
-      );
-    }
-    if (snapshot.disks && snapshot.disks.length > 0) {
-      lines.push('', vscode.l10n.t('Disks:'));
-      for (const disk of snapshot.disks) {
-        lines.push(`  ${disk.mountPoint}  ${Math.round(disk.percent)}%  (${formatBytes(disk.used)} / ${formatBytes(disk.total)})`);
-      }
-    }
-    if (config.enableNetwork && snapshot.network) {
-      lines.push('', `${vscode.l10n.t('Network')}  ↓ ${formatRate(snapshot.network.rxRate)}  ↑ ${formatRate(snapshot.network.txRate)}`);
-    }
-    if (config.enableGpu && snapshot.gpus && snapshot.gpus.length > 0) {
-      lines.push('', 'GPU:');
-      for (const gpu of snapshot.gpus) {
-        lines.push(
-          `  #${gpu.index} ${gpu.name ?? ''}  ${gpu.utilizationPercent}%  ${vscode.l10n.t('VRAM {0}/{1} MB', gpu.memoryUsedMb, gpu.memoryTotalMb)}  ${gpu.temperatureC}°C`,
-        );
-      }
-    }
-    if (config.enableDocker && snapshot.docker) {
-      lines.push('', `Docker  ${vscode.l10n.t('Running containers: {0}', snapshot.docker.containerCount)}`);
-      for (const c of snapshot.docker.containers.slice(0, 5)) {
-        lines.push(`  ${c.name}  CPU ${c.cpuPercent.toFixed(1)}%  ${vscode.l10n.t('Memory')} ${formatBytes(c.memoryUsedBytes)}`);
-      }
-    }
-    if (snapshot.uptimeSeconds !== undefined) {
-      lines.push('', `Uptime  ${formatUptime(snapshot.uptimeSeconds)}`);
-    }
-    lines.push('', '---', vscode.l10n.t('Click to view trend chart'));
-
-    const md = new vscode.MarkdownString(lines.join('\n'));
-    md.isTrusted = false;
-    return md;
+  /** 仅供集成测试读取当前渲染状态用,不做其他用途。 */
+  get debugState(): {
+    icon: StatusBarItemDebugState;
+    cpu: StatusBarItemDebugState;
+    mem: StatusBarItemDebugState;
+  } {
+    return {
+      icon: { ...debugStateOf(this.iconItem), visible: true },
+      cpu: { ...debugStateOf(this.cpuItem), visible: this.cpuVisible },
+      mem: { ...debugStateOf(this.memItem), visible: this.memVisible },
+    };
   }
 
   dispose(): void {
-    this.item.dispose();
+    this.iconItem.dispose();
+    this.cpuItem.dispose();
+    this.memItem.dispose();
   }
+}
+
+interface StatusBarItemDebugState {
+  text: string;
+  color: string | vscode.ThemeColor | undefined;
+  backgroundColor: vscode.ThemeColor | undefined;
+  tooltip: string | vscode.MarkdownString | undefined;
+  alignment: vscode.StatusBarAlignment;
+  priority: number | undefined;
+  command: string | vscode.Command | undefined;
+  visible: boolean;
+}
+
+function debugStateOf(item: vscode.StatusBarItem): Omit<StatusBarItemDebugState, 'visible'> {
+  return {
+    text: item.text,
+    color: item.color,
+    backgroundColor: item.backgroundColor,
+    tooltip: item.tooltip,
+    alignment: item.alignment,
+    priority: item.priority,
+    command: item.command,
+  };
 }

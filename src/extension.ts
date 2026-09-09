@@ -9,13 +9,19 @@ import { DockerCollector } from './collectors/docker';
 import { StatsStore } from './store/statsStore';
 import { Poller } from './scheduler';
 import { PulseStatusBar } from './statusBar';
-import { readConfig, isRemotePulseConfigChange } from './config';
+import { readConfig, isRemotePulseConfigChange, RemotePulseConfig } from './config';
 import { CollectionState, Snapshot } from './types';
-import { TrendPanel, TrendSeries } from './webview/trendPanel';
+import { HostInfo, TrendPanel, TrendPayload } from './webview/trendPanel';
+import { formatHostLabel } from './util/hostLabel';
 
 const TREND_WINDOW_MS = 30 * 60 * 1000;
 
-export function activate(context: vscode.ExtensionContext): void {
+/** 本地(非远程)窗口里没有"远程主机"可言,不应该出现状态栏/占用轮询资源。 */
+export function activate(context: vscode.ExtensionContext): { monitoring: boolean } {
+  if (!vscode.env.remoteName) {
+    return { monitoring: false };
+  }
+
   const statusBar = new PulseStatusBar();
   const store = new StatsStore();
 
@@ -28,6 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const dockerCollector = new DockerCollector();
 
   const hostLabel = resolveHostLabel();
+  const host: HostInfo = { label: hostLabel, user: safeUserName(), addresses: listIPv4Addresses() };
 
   let state: CollectionState = 'loading';
   let lastWasCritical = false;
@@ -48,14 +55,10 @@ export function activate(context: vscode.ExtensionContext): void {
     };
     store.push(snapshot);
 
-    const sparklines = {
-      cpu: store.recentValues(TREND_WINDOW_MS, s => s.cpu?.percent),
-      memory: store.recentValues(TREND_WINDOW_MS, s => s.memory?.percent),
-    };
-    statusBar.update(hostLabel, snapshot, config, state, sparklines);
+    statusBar.update(snapshot, config, state);
     maybeNotifyCritical(snapshot);
     if (TrendPanel.isOpen()) {
-      TrendPanel.refreshIfOpen(hostLabel, buildTrendSeries(store));
+      TrendPanel.refreshIfOpen(host, buildTrendPayload(store, config));
     }
   }
 
@@ -63,17 +66,21 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!config.enableNotifications) {
       return;
     }
-    const percent = config.statusBarMetric === 'memory' ? snapshot.memory?.percent : snapshot.cpu?.percent;
-    if (percent === undefined) {
-      return;
+    const cpuPercent = snapshot.cpu?.percent;
+    const memPercent = snapshot.memory?.percent;
+    const criticalParts: string[] = [];
+    if (cpuPercent !== undefined && cpuPercent >= config.criticalThreshold) {
+      criticalParts.push(`CPU ${Math.round(cpuPercent)}%`);
     }
-    const isCritical = percent >= config.criticalThreshold;
+    if (memPercent !== undefined && memPercent >= config.criticalThreshold) {
+      criticalParts.push(`${vscode.l10n.t('Memory')} ${Math.round(memPercent)}%`);
+    }
+    const isCritical = criticalParts.length > 0;
     // 只在"跨越"到严重态的那一刻通知一次,而不是每轮轮询都弹窗,避免持续过载时通知刷屏。
     // 恢复到阈值以下后重新越界会再次触发,保证用户始终能看到最新一次告警。
     if (isCritical && !lastWasCritical) {
-      const metricLabel = config.statusBarMetric === 'memory' ? vscode.l10n.t('Memory') : 'CPU';
       void vscode.window.showWarningMessage(
-        `Remote Pulse: ${vscode.l10n.t('{0} usage on {1} has reached {2}%', metricLabel, hostLabel, Math.round(percent))}`,
+        `Remote Pulse: ${vscode.l10n.t('{0} on {1} has reached the critical threshold', criticalParts.join(', '), hostLabel)}`,
       );
     }
     lastWasCritical = isCritical;
@@ -89,7 +96,7 @@ export function activate(context: vscode.ExtensionContext): void {
       light.cpu = cpu;
       light.memory = memory;
       light.disks = disks;
-      light.network = config.enableNetwork ? await networkCollector.collect() : undefined;
+      light.network = config.trendPanelSections.includes('network') ? await networkCollector.collect() : undefined;
       if (cpu) {
         state = 'ok';
       }
@@ -101,8 +108,8 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   async function collectHeavy(): Promise<void> {
-    heavy.gpus = config.enableGpu ? await gpuCollector.collect() : undefined;
-    heavy.docker = config.enableDocker ? await dockerCollector.collect() : undefined;
+    heavy.gpus = config.trendPanelSections.includes('gpu') ? await gpuCollector.collect() : undefined;
+    heavy.docker = config.trendPanelSections.includes('docker') ? await dockerCollector.collect() : undefined;
   }
 
   const lightPoller = new Poller(collectLight, config.refreshInterval);
@@ -126,7 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   const showTrendCommand = vscode.commands.registerCommand('remotePulse.showTrend', () => {
-    TrendPanel.createOrShow(hostLabel, buildTrendSeries(store));
+    TrendPanel.createOrShow(host, buildTrendPayload(store, config));
   });
 
   const refreshCommand = vscode.commands.registerCommand('remotePulse.refresh', async () => {
@@ -142,6 +149,8 @@ export function activate(context: vscode.ExtensionContext): void {
     lightPoller,
     heavyPoller,
   );
+
+  return { monitoring: true };
 }
 
 export function deactivate(): void {
@@ -153,9 +162,20 @@ function resolveHostLabel(): string {
   try {
     const hostname = os.hostname();
     const ip = findNonInternalIPv4();
-    return ip ? `${hostname} (${ip})` : hostname;
+    // WSL 里 os.hostname() 读到的是发行版自己的主机名(很多发行版默认沿用/继承 Windows 主机名),
+    // 标出 WSL_DISTRO_NAME 能让用户一眼确认这确实是 WSL 侧数据,而不是误连到了外层 Windows。
+    return formatHostLabel(hostname, ip, process.env.WSL_DISTRO_NAME);
   } catch {
     return vscode.l10n.t('Remote host');
+  }
+}
+
+/** 无 /etc/passwd 条目的容器里 os.userInfo() 会抛错;用户名只是身份标注,取不到就不显示。 */
+function safeUserName(): string | undefined {
+  try {
+    return os.userInfo().username || undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -168,29 +188,56 @@ function safeUptime(): number | undefined {
   }
 }
 
-function findNonInternalIPv4(): string | undefined {
+/** 多网卡机器上"第一个"地址是任意的,所以全部列出;超过 4 张网卡就不再是有用信息了。 */
+const MAX_SHOWN_INTERFACES = 4;
+
+function listIPv4Addresses(): { iface: string; address: string }[] {
   try {
     const interfaces = os.networkInterfaces();
+    const found: { iface: string; address: string }[] = [];
     for (const name of Object.keys(interfaces)) {
-      for (const iface of interfaces[name] ?? []) {
-        if (iface.family === 'IPv4' && !iface.internal) {
-          return iface.address;
+      for (const entry of interfaces[name] ?? []) {
+        if (entry.family === 'IPv4' && !entry.internal) {
+          found.push({ iface: name, address: entry.address });
         }
       }
     }
-    return undefined;
+    return found.slice(0, MAX_SHOWN_INTERFACES);
   } catch {
-    return undefined;
+    return [];
   }
 }
 
-function buildTrendSeries(store: StatsStore): TrendSeries {
+function findNonInternalIPv4(): string | undefined {
+  return listIPv4Addresses()[0]?.address;
+}
+
+function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendPayload {
   const history = store.getHistory();
   const cutoff = Date.now() - TREND_WINDOW_MS;
   const windowed = history.filter(s => s.timestamp >= cutoff);
+  const latestSnapshot = store.latest();
+  const showNetwork = config.trendPanelSections.includes('network');
+  // rx+tx 之和,原始 B/s——不做归一化,趋势面板画在自己独立的右侧 y 轴上,
+  // 不用挤进 CPU/内存共用的 0-100% 左轴。
+  const network = showNetwork ? windowed.map(s => (s.network ? s.network.rxRate + s.network.txRate : 0)) : undefined;
+
   return {
-    timestamps: windowed.map(s => s.timestamp),
-    cpu: windowed.map(s => s.cpu?.percent ?? 0),
-    memory: windowed.map(s => s.memory?.percent ?? 0),
+    series: {
+      timestamps: windowed.map(s => s.timestamp),
+      cpu: windowed.map(s => s.cpu?.percent ?? 0),
+      memory: windowed.map(s => s.memory?.percent ?? 0),
+      network,
+    },
+    latest: latestSnapshot && {
+      cpu: latestSnapshot.cpu,
+      memory: latestSnapshot.memory,
+      disks: latestSnapshot.disks ?? [],
+      network: showNetwork ? latestSnapshot.network : undefined,
+      gpus: config.trendPanelSections.includes('gpu') ? (latestSnapshot.gpus ?? []) : [],
+      docker: config.trendPanelSections.includes('docker') ? latestSnapshot.docker : undefined,
+      uptimeSeconds: latestSnapshot.uptimeSeconds,
+    },
+    thresholds: { warning: config.warningThreshold, critical: config.criticalThreshold },
   };
 }
