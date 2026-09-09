@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { AlertLevel, CpuStats, DiskStats, DockerStats, GpuStats, MemoryStats, NetworkRate } from '../types';
 import { calcAlertLevel } from '../store/statsStore';
 import { formatBytes, formatRate, formatUptime } from '../util/sparkline';
-import { configureStatusBarMetrics, configureTrendPanelSections } from '../config';
+import { configureStatusBarMetrics, configureTrendPanelSections, configureTrendChartMetrics } from '../config';
 
 function nonce(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -14,15 +14,19 @@ function nonce(): string {
 }
 
 export interface TrendSeries {
-  /** 与 cpu/memory 一一对应的 epoch ms,悬浮提示要靠它算出该点的具体时间。 */
+  /** 与其余数组一一对应的 epoch ms,悬浮提示要靠它算出该点的具体时间。 */
   timestamps: number[];
-  cpu: number[];
-  memory: number[];
+  /** 每条线是否出现由 remotePulse.trendChartMetrics 独立控制,和"System"信息行/GPU 详情区块是否显示是两码事——
+   * 所以这里全部是可选数组,undefined 就是"这条线没被勾选,不画"。 */
+  cpu?: number[];
+  memory?: number[];
   /**
    * rx+tx 之和,单位 B/s,原始值不做归一化——网络速率没有 CPU/内存那种天然的 0-100% 上限,
    * 画图时走独立的右侧 y 轴(自己的量纲),而不是硬挤进 CPU/内存共用的百分比左轴。
    */
   network?: number[];
+  /** 只取第一张 GPU(和状态栏摘要同一个"主卡"约定),多卡详情仍然只在 GPU 详情区块里能看到。 */
+  gpu?: number[];
 }
 
 export interface TrendLatest {
@@ -67,6 +71,9 @@ interface MetricRow {
 }
 
 interface ChartLegendItem {
+  /** 客户端靠这个 key(而不是数组下标)去 SERIES_DEFS 里找颜色/className——
+   * 一旦某条线可以被单独勾掉,"第 i 个图例对应第 i 个预定义线"这个位置假设就不成立了。 */
+  key: 'cpu' | 'memory' | 'network' | 'gpu';
   name: string;
   /** 最新一次采集的即时值,和图表末端的圆点是同一个数,不随悬浮变化。 */
   value?: string;
@@ -82,7 +89,7 @@ interface PanelModel {
   updated: string;
   settingsLabel: string;
   groups: PanelGroup[];
-  series: { timestamps: number[]; cpu: number[]; memory: number[]; network?: number[] };
+  series: { timestamps: number[]; cpu?: number[]; memory?: number[]; network?: number[]; gpu?: number[] };
 }
 
 /**
@@ -91,10 +98,11 @@ interface PanelModel {
  * 菜单最前面,"打开设置(JSON/UI)"作为兜底选项留在最后。
  */
 async function showSettingsMenu(): Promise<void> {
-  type Choice = { label: string; action: 'statusBar' | 'trendPanel' | 'settings' };
+  type Choice = { label: string; action: 'statusBar' | 'trendPanel' | 'trendChart' | 'settings' };
   const items: Choice[] = [
     { label: `$(checklist) ${vscode.l10n.t('Configure Status Bar Metrics…')}`, action: 'statusBar' },
     { label: `$(checklist) ${vscode.l10n.t('Configure Trend Panel Sections…')}`, action: 'trendPanel' },
+    { label: `$(checklist) ${vscode.l10n.t('Configure Trend Chart Metrics…')}`, action: 'trendChart' },
     { label: `$(settings-gear) ${vscode.l10n.t('Open Settings (JSON/UI)')}`, action: 'settings' },
   ];
   const picked = await vscode.window.showQuickPick(items, { placeHolder: vscode.l10n.t('Remote Pulse Settings') });
@@ -105,6 +113,8 @@ async function showSettingsMenu(): Promise<void> {
     await configureStatusBarMetrics();
   } else if (picked.action === 'trendPanel') {
     await configureTrendPanelSections();
+  } else if (picked.action === 'trendChart') {
+    await configureTrendChartMetrics();
   } else {
     await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tanzz.remote-pulse');
   }
@@ -248,17 +258,28 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
     groups.push({ kind: 'metrics', title: vscode.l10n.t('System'), rows: system });
   }
 
-  const legend: ChartLegendItem[] = [
-    { name: 'CPU', value: latest?.cpu ? `${Math.round(latest.cpu.percent)}%` : undefined },
-    { name: vscode.l10n.t('Memory'), value: latest?.memory ? `${Math.round(latest.memory.percent)}%` : undefined },
-  ];
-  // 图例顺序就是图表画线的顺序(cpu, memory, 再 network)——PANEL_SCRIPT 按这个顺序把
-  // legend.length 映射回 series 里的哪几条线,两边靠"顺序"这一份隐含约定对齐。
+  // 图例的"当前值"直接取 series 数组的最后一个点,而不是另外查 latest.* ——这样图例
+  // 完全由 trendChartMetrics 驱动,不会因为"System"信息行/GPU 详情区块各自的显示开关
+  // (trendPanelSections)而跟着变化,两套配置才能真正互不影响地独立生效。
+  const lastOf = (values?: number[]): number | undefined => (values && values.length ? values[values.length - 1] : undefined);
+  // 图例顺序就是图表画线的顺序(cpu, memory, gpu, 再 network)——PANEL_SCRIPT 按 legend 里的
+  // key(而不是数组下标)去匹配预定义的颜色/className,顺序只影响图例文字的先后和线的叠放层次。
+  const legend: ChartLegendItem[] = [];
+  if (series.cpu) {
+    const value = lastOf(series.cpu);
+    legend.push({ key: 'cpu', name: 'CPU', value: value !== undefined ? `${Math.round(value)}%` : undefined });
+  }
+  if (series.memory) {
+    const value = lastOf(series.memory);
+    legend.push({ key: 'memory', name: vscode.l10n.t('Memory'), value: value !== undefined ? `${Math.round(value)}%` : undefined });
+  }
+  if (series.gpu) {
+    const value = lastOf(series.gpu);
+    legend.push({ key: 'gpu', name: 'GPU', value: value !== undefined ? `${Math.round(value)}%` : undefined });
+  }
   if (series.network) {
-    legend.push({
-      name: vscode.l10n.t('Network'),
-      value: latest?.network ? formatRate(latest.network.rxRate + latest.network.txRate) : undefined,
-    });
+    const value = lastOf(series.network);
+    legend.push({ key: 'network', name: vscode.l10n.t('Network'), value: value !== undefined ? formatRate(value) : undefined });
   }
   groups.push({
     kind: 'chart',
@@ -338,6 +359,7 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
       cpu: series.cpu,
       memory: series.memory,
       network: series.network,
+      gpu: series.gpu,
     },
   };
 }
@@ -357,6 +379,7 @@ const PANEL_CSS = `
     --rp-cpu: var(--vscode-charts-blue, #3794ff);
     --rp-mem: var(--vscode-charts-purple, #b180d7);
     --rp-net: var(--vscode-charts-green, #89d185);
+    --rp-gpu: var(--vscode-charts-orange, #d18616);
   }
   body {
     margin: 0;
@@ -437,6 +460,7 @@ const PANEL_CSS = `
   .chart .axis { fill: var(--rp-muted); font-size: 11px; }
   .chart .cpu { fill: none; stroke: var(--rp-cpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .mem { fill: none; stroke: var(--rp-mem); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .gpu { fill: none; stroke: var(--rp-gpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .net { fill: none; stroke: var(--rp-net); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .guide { stroke: var(--rp-muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; pointer-events: none; }
   .chart .hover-dot { opacity: 0; pointer-events: none; }
@@ -488,10 +512,12 @@ const PANEL_SCRIPT = `
   let chartEl = null;
   let chartHint = null;
   let chartTooltip = null;
-  /** 图表最多 3 条线:cpu、memory,再加可选的 network——顺序和 buildModel() 拼 legend 的顺序对齐。 */
+  /** cpu/memory/gpu/network 四条线各自的颜色/className——remotePulse.trendChartMetrics 决定实际画哪几条,
+      chartActiveDefs 按 key 而不是数组下标去这里查,顺序无关。 */
   var SERIES_DEFS = [
     { key: 'cpu', colorVar: 'var(--rp-cpu)', className: 'cpu' },
     { key: 'memory', colorVar: 'var(--rp-mem)', className: 'mem' },
+    { key: 'gpu', colorVar: 'var(--rp-gpu)', className: 'gpu' },
     { key: 'network', colorVar: 'var(--rp-net)', className: 'net' },
   ];
   let chartActiveDefs = SERIES_DEFS.slice(0, 2);
@@ -537,15 +563,22 @@ const PANEL_SCRIPT = `
     return value.toFixed(i === 0 ? 0 : 1) + ' ' + units[i] + '/s';
   }
 
-  /** 把窗口内的原始峰值撑到一个好看的刻度上限——按 1024 进制取整(1/2/5 阶梯),
-      这样轴标签显示出来才是整数的 KB/MB(比如 "2.0 MB/s"),跟 formatRateJs 的二进制单位对得上,
-      不会出现 "1.9 MB/s" 这种十进制取整后被二进制单位换算弄得不整的数。 */
+  /** 把窗口内的原始峰值撑到一个好看的刻度上限——按 1024 进制取整,这样轴标签显示出来才是
+      整数的 KB/MB(比如 "2.0 MB/s"),跟 formatRateJs 的二进制单位对得上,不会出现 "1.9 MB/s"
+      这种十进制取整后被二进制单位换算弄得不整的数。阶梯只到 10 会漏掉 10~1024 这一整段——
+      比如峰值 878KB/s,除一次 1024 后 v=878,不满足 <=10 里任何一档,原逻辑会直接落到"10",
+      算出来的上限(10KB)反而比峰值本身还小,把线整条顶穿画到轴外面,看着像那条线消失了。
+      阶梯延伸到 1024 才能覆盖任意峰值。 */
   function niceMax(raw) {
     if (!isFinite(raw) || raw <= 0) return 1;
     var i = 0;
     var v = raw;
     while (v >= 1024 && i < 4) { v /= 1024; i++; }
-    var niceFrac = v <= 1 ? 1 : v <= 2 ? 2 : v <= 5 ? 5 : 10;
+    var steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1024];
+    var niceFrac = 1024;
+    for (var s = 0; s < steps.length; s++) {
+      if (v <= steps[s]) { niceFrac = steps[s]; break; }
+    }
     return niceFrac * Math.pow(1024, i);
   }
 
@@ -570,9 +603,10 @@ const PANEL_SCRIPT = `
     return JSON.stringify(m.groups.map(function (g) {
       if (g.kind === 'metrics') return ['m', g.title, g.rows.map(function (r) { return [r.label, !!r.sub, !!r.strong, r.percent !== undefined]; })];
       if (g.kind === 'table') return ['t', g.title, g.rows.map(function (r) { return r[0]; })];
-      // legend.length 变化(比如 network 被中途启用/停用)必须触发整块重建,否则 chartActiveDefs
-      // 和图例项数对不上,apply() 按旧的 slot 顺序去读新模型会直接读错位置。
-      return ['c', g.title, g.legend.length];
+      // 比较的是 legend 的 key 序列而不是长度——中途切换哪几条线(哪怕数量不变,比如把 cpu
+      // 换成 gpu)也必须触发整块重建,否则 chartActiveDefs 和图例项对不上,apply() 会拿旧
+      // slot 去读新模型,读错位置或者干脆把 GPU 数据画成 CPU 的颜色。
+      return ['c', g.title, g.legend.map(function (item) { return item.key; }).join(',')];
     })) + '|' + m.host.name + '|' + m.host.meta + '|' + (m.host.user || '');
   }
 
@@ -627,9 +661,12 @@ const PANEL_SCRIPT = `
       head.appendChild(el('span', 'section-title', group.title));
 
       if (group.kind === 'chart') {
+        // 按 key 从 SERIES_DEFS 里找对应的颜色/className,而不是假设 legend 的第 i 项对应
+        // SERIES_DEFS 的第 i 项——一旦某条线可以被单独勾掉,这个位置假设就不成立了。
         // 每次 build() 都拷贝一份新对象带上当前语言的 name,SERIES_DEFS 本身只提供 key/颜色这些不随语言变化的部分。
-        chartActiveDefs = SERIES_DEFS.slice(0, group.legend.length).map(function (def, i) {
-          return { key: def.key, name: group.legend[i].name, colorVar: def.colorVar, className: def.className };
+        chartActiveDefs = group.legend.map(function (item) {
+          var def = SERIES_DEFS.filter(function (d) { return d.key === item.key; })[0];
+          return { key: def.key, name: item.name, colorVar: def.colorVar, className: def.className };
         });
         const legend = el('span', 'legend');
         for (let i = 0; i < group.legend.length; i++) {
@@ -876,13 +913,14 @@ const PANEL_SCRIPT = `
   }
 
   function valuesFor(key, series) {
-    if (key === 'cpu') return series.cpu;
-    if (key === 'memory') return series.memory;
+    if (key === 'cpu') return series.cpu || [];
+    if (key === 'memory') return series.memory || [];
+    if (key === 'gpu') return series.gpu || [];
     if (key === 'network') return series.network || [];
     return [];
   }
 
-  /** cpu/memory 都是 0-100% 的左轴;network 走自己的右轴量纲(domain.max 由 niceMax() 决定)。 */
+  /** cpu/memory/gpu 都是 0-100% 的左轴;network 走自己的右轴量纲(domain.max 由 niceMax() 决定)。 */
   function toY(value, domain, top, plotH) {
     const v = Math.max(domain.min, Math.min(domain.max, value));
     const range = domain.max - domain.min || 1;
@@ -891,7 +929,8 @@ const PANEL_SCRIPT = `
 
   function drawChart(series) {
     if (!chartEl) return;
-    const hasData = series.cpu.length > 1 || series.memory.length > 1;
+    // 哪几条线在画由 chartActiveDefs(源自 trendChartMetrics)决定,不再假设 cpu/memory 一定存在。
+    const hasData = chartActiveDefs.some(function (def) { return valuesFor(def.key, series).length > 1; });
     chartHint.hidden = hasData;
     chartEl.hidden = !hasData;
     if (!hasData) {

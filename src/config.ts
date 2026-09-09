@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 
 export type StatusBarMetric = 'cpu' | 'memory' | 'gpu' | 'network';
 export type TrendPanelSection = 'network' | 'gpu' | 'docker';
+/** 折线图里画哪几条线,和 trendPanelSections(GPU 详情区块/Docker 表格是否出现)、
+ * statusBarMetrics(状态栏摘要数字)各自独立——三处配置的候选指标故意保持同一套名字
+ * (cpu/memory/gpu/network 的交集或子集),但三个配置项分开存,互不联动。 */
+export type TrendChartMetric = 'cpu' | 'memory' | 'network' | 'gpu';
 
 export interface RemotePulseConfig {
   refreshInterval: number;
@@ -11,6 +15,7 @@ export interface RemotePulseConfig {
   criticalThreshold: number;
   statusBarMetrics: StatusBarMetric[];
   trendPanelSections: TrendPanelSection[];
+  trendChartMetrics: TrendChartMetric[];
   enableNotifications: boolean;
   diskMountPoints: string[];
 }
@@ -18,6 +23,7 @@ export interface RemotePulseConfig {
 const SECTION = 'remotePulse';
 const DEFAULT_STATUS_BAR_METRICS: StatusBarMetric[] = ['cpu', 'memory'];
 const DEFAULT_TREND_PANEL_SECTIONS: TrendPanelSection[] = ['gpu', 'docker'];
+const DEFAULT_TREND_CHART_METRICS: TrendChartMetric[] = ['cpu', 'memory'];
 
 export function readConfig(): RemotePulseConfig {
   const cfg = vscode.workspace.getConfiguration(SECTION);
@@ -29,6 +35,7 @@ export function readConfig(): RemotePulseConfig {
     criticalThreshold: cfg.get<number>('criticalThreshold', 95),
     statusBarMetrics: cfg.get<StatusBarMetric[]>('statusBarMetrics', DEFAULT_STATUS_BAR_METRICS),
     trendPanelSections: cfg.get<TrendPanelSection[]>('trendPanelSections', DEFAULT_TREND_PANEL_SECTIONS),
+    trendChartMetrics: cfg.get<TrendChartMetric[]>('trendChartMetrics', DEFAULT_TREND_CHART_METRICS),
     enableNotifications: cfg.get<boolean>('enableNotifications', false),
     diskMountPoints: cfg.get<string[]>('diskMountPoints', []),
   };
@@ -63,8 +70,20 @@ export async function configureTrendPanelSections(): Promise<void> {
   await runMultiSelect('trendPanelSections', options, vscode.l10n.t('Choose which optional sections to show in the trend panel'));
 }
 
+/** 折线图会不会因为这里多勾了指标而变挤,和 GPU 详情区块/Docker 表格要不要出现(trendPanelSections)
+ * 是两个完全独立的决定,所以这是第三个多选命令,不复用前两个的配置项。 */
+export async function configureTrendChartMetrics(): Promise<void> {
+  const options: { key: TrendChartMetric; label: string }[] = [
+    { key: 'cpu', label: vscode.l10n.t('CPU usage') },
+    { key: 'memory', label: vscode.l10n.t('Memory usage') },
+    { key: 'gpu', label: vscode.l10n.t('GPU utilization (primary GPU only)') },
+    { key: 'network', label: vscode.l10n.t('Network transfer rate') },
+  ];
+  await runMultiSelect('trendChartMetrics', options, vscode.l10n.t('Choose which metrics to plot as lines in the trend chart'));
+}
+
 async function runMultiSelect<K extends string>(
-  settingKey: 'statusBarMetrics' | 'trendPanelSections',
+  settingKey: 'statusBarMetrics' | 'trendPanelSections' | 'trendChartMetrics',
   options: { key: K; label: string }[],
   placeHolder: string,
 ): Promise<void> {

@@ -13,6 +13,7 @@ function baseConfig(overrides: Partial<RemotePulseConfig> = {}): RemotePulseConf
     criticalThreshold: 95,
     statusBarMetrics: ['cpu', 'memory'],
     trendPanelSections: ['gpu', 'docker'],
+    trendChartMetrics: ['cpu', 'memory'],
     enableNotifications: false,
     diskMountPoints: [],
     ...overrides,
