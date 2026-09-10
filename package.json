@@ -49,6 +49,21 @@
         "command": "remotePulse.refresh",
         "title": "%command.refresh.title%",
         "category": "Remote Pulse"
+      },
+      {
+        "command": "remotePulse.configureStatusBarMetrics",
+        "title": "%command.configureStatusBarMetrics.title%",
+        "category": "Remote Pulse"
+      },
+      {
+        "command": "remotePulse.configureTrendPanelSections",
+        "title": "%command.configureTrendPanelSections.title%",
+        "category": "Remote Pulse"
+      },
+      {
+        "command": "remotePulse.configureTrendChartMetrics",
+        "title": "%command.configureTrendChartMetrics.title%",
+        "category": "Remote Pulse"
       }
     ],
     "configuration": {
@@ -90,12 +105,18 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["cpu", "memory"],
-            "enumDescriptions": ["%config.statusBarMetrics.cpu.description%", "%config.statusBarMetrics.memory.description%"]
+            "enum": ["cpu", "memory", "gpu", "network"],
+            "enumDescriptions": [
+              "%config.statusBarMetrics.cpu.description%",
+              "%config.statusBarMetrics.memory.description%",
+              "%config.statusBarMetrics.gpu.description%",
+              "%config.statusBarMetrics.network.description%"
+            ]
           },
           "uniqueItems": true,
           "default": ["cpu", "memory"],
-          "description": "%config.statusBarMetrics.description%"
+          "description": "%config.statusBarMetrics.description%",
+          "markdownDescription": "%config.statusBarMetrics.markdownDescription%"
         },
         "remotePulse.trendPanelSections": {
           "type": "array",
@@ -110,7 +131,25 @@
           },
           "uniqueItems": true,
           "default": ["gpu", "docker"],
-          "description": "%config.trendPanelSections.description%"
+          "description": "%config.trendPanelSections.description%",
+          "markdownDescription": "%config.trendPanelSections.markdownDescription%"
+        },
+        "remotePulse.trendChartMetrics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["cpu", "memory", "gpu", "network"],
+            "enumDescriptions": [
+              "%config.trendChartMetrics.cpu.description%",
+              "%config.trendChartMetrics.memory.description%",
+              "%config.trendChartMetrics.gpu.description%",
+              "%config.trendChartMetrics.network.description%"
+            ]
+          },
+          "uniqueItems": true,
+          "default": ["cpu", "memory"],
+          "description": "%config.trendChartMetrics.description%",
+          "markdownDescription": "%config.trendChartMetrics.markdownDescription%"
         },
         "remotePulse.enableNotifications": {
           "type": "boolean",

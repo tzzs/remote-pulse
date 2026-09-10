@@ -9,7 +9,14 @@ import { DockerCollector } from './collectors/docker';
 import { StatsStore } from './store/statsStore';
 import { Poller } from './scheduler';
 import { PulseStatusBar } from './statusBar';
-import { readConfig, isRemotePulseConfigChange, RemotePulseConfig } from './config';
+import {
+  readConfig,
+  isRemotePulseConfigChange,
+  RemotePulseConfig,
+  configureStatusBarMetrics,
+  configureTrendPanelSections,
+  configureTrendChartMetrics,
+} from './config';
 import { CollectionState, Snapshot } from './types';
 import { HostInfo, TrendPanel, TrendPayload } from './webview/trendPanel';
 import { formatHostLabel } from './util/hostLabel';
@@ -96,7 +103,14 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
       light.cpu = cpu;
       light.memory = memory;
       light.disks = disks;
-      light.network = config.trendPanelSections.includes('network') ? await networkCollector.collect() : undefined;
+      // 网络数据有三处可能用到它:趋势面板的 System 行、状态栏摘要、趋势图的线——
+      // 三个配置项(trendPanelSections/statusBarMetrics/trendChartMetrics)各自独立勾选,
+      // 只要任意一处需要就得采集,采集这一步不区分"为了哪个用途"。
+      const needsNetwork =
+        config.trendPanelSections.includes('network') ||
+        config.statusBarMetrics.includes('network') ||
+        config.trendChartMetrics.includes('network');
+      light.network = needsNetwork ? await networkCollector.collect() : undefined;
       if (cpu) {
         state = 'ok';
       }
@@ -108,7 +122,12 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
   }
 
   async function collectHeavy(): Promise<void> {
-    heavy.gpus = config.trendPanelSections.includes('gpu') ? await gpuCollector.collect() : undefined;
+    // 同理,GPU 数据可能喂状态栏摘要、趋势面板的逐卡详情、趋势图的线,三处独立勾选,任一处需要就采集。
+    const needsGpu =
+      config.trendPanelSections.includes('gpu') ||
+      config.statusBarMetrics.includes('gpu') ||
+      config.trendChartMetrics.includes('gpu');
+    heavy.gpus = needsGpu ? await gpuCollector.collect() : undefined;
     heavy.docker = config.trendPanelSections.includes('docker') ? await dockerCollector.collect() : undefined;
   }
 
@@ -140,12 +159,28 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     await Promise.all([lightPoller.runNow(), heavyPoller.runNow()]);
   });
 
+  const configureStatusBarMetricsCommand = vscode.commands.registerCommand(
+    'remotePulse.configureStatusBarMetrics',
+    configureStatusBarMetrics,
+  );
+  const configureTrendPanelSectionsCommand = vscode.commands.registerCommand(
+    'remotePulse.configureTrendPanelSections',
+    configureTrendPanelSections,
+  );
+  const configureTrendChartMetricsCommand = vscode.commands.registerCommand(
+    'remotePulse.configureTrendChartMetrics',
+    configureTrendChartMetrics,
+  );
+
   context.subscriptions.push(
     statusBar,
     focusListener,
     configListener,
     showTrendCommand,
     refreshCommand,
+    configureStatusBarMetricsCommand,
+    configureTrendPanelSectionsCommand,
+    configureTrendChartMetricsCommand,
     lightPoller,
     heavyPoller,
   );
@@ -217,24 +252,40 @@ function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendP
   const cutoff = Date.now() - TREND_WINDOW_MS;
   const windowed = history.filter(s => s.timestamp >= cutoff);
   const latestSnapshot = store.latest();
-  const showNetwork = config.trendPanelSections.includes('network');
-  // rx+tx 之和,原始 B/s——不做归一化,趋势面板画在自己独立的右侧 y 轴上,
-  // 不用挤进 CPU/内存共用的 0-100% 左轴。
-  const network = showNetwork ? windowed.map(s => (s.network ? s.network.rxRate + s.network.txRate : 0)) : undefined;
+  // trendPanelSections 只管"System 信息行要不要显示网络这一行"和"GPU 详情区块要不要出现"——
+  // 和下面 series 里"折线图要不要画这条线"(trendChartMetrics)是两个独立的开关,故意不共用同一个布尔值,
+  // 否则用户要么两处一起有、要么两处一起没有,做不到"面板里看 GPU 详情,但图表不画 GPU 线"这种组合。
+  const showNetworkDetail = config.trendPanelSections.includes('network');
+  const showGpuDetail = config.trendPanelSections.includes('gpu');
+
+  const showCpuChart = config.trendChartMetrics.includes('cpu');
+  const showMemoryChart = config.trendChartMetrics.includes('memory');
+  // 光勾了 trendChartMetrics 里的 gpu 还不够——没有 nvidia-smi/没装 GPU 时 latestSnapshot.gpus
+  // 永远是空数组,若只看配置就画,`s.gpus?.[0]?.utilizationPercent ?? 0` 兜底出来的 0 会在图上
+  // 变成一条以假乱真、恒定在 0% 的"GPU"线。和状态栏 GPU 项(primaryGpu !== undefined)同一个判断。
+  const hasGpuData = (latestSnapshot?.gpus?.length ?? 0) > 0;
+  const showGpuChart = config.trendChartMetrics.includes('gpu') && hasGpuData;
+  const showNetworkChart = config.trendChartMetrics.includes('network');
 
   return {
     series: {
       timestamps: windowed.map(s => s.timestamp),
-      cpu: windowed.map(s => s.cpu?.percent ?? 0),
-      memory: windowed.map(s => s.memory?.percent ?? 0),
-      network,
+      cpu: showCpuChart ? windowed.map(s => s.cpu?.percent ?? 0) : undefined,
+      memory: showMemoryChart ? windowed.map(s => s.memory?.percent ?? 0) : undefined,
+      // 只取第一张 GPU(和状态栏摘要同一个"主卡"约定),多卡详情仍然只在 GPU 详情区块里能看到。
+      gpu: showGpuChart ? windowed.map(s => s.gpus?.[0]?.utilizationPercent ?? 0) : undefined,
+      // 上传/下载分两个数组,不再合成 rx+tx 一条线——合并了就分不清方向,和状态栏网络项拆成
+      // 上下行两截是同一个理由。原始 B/s,不做归一化,趋势面板画在自己独立的右侧 y 轴上,
+      // 不用挤进 CPU/内存共用的 0-100% 左轴。
+      networkRx: showNetworkChart ? windowed.map(s => s.network?.rxRate ?? 0) : undefined,
+      networkTx: showNetworkChart ? windowed.map(s => s.network?.txRate ?? 0) : undefined,
     },
     latest: latestSnapshot && {
       cpu: latestSnapshot.cpu,
       memory: latestSnapshot.memory,
       disks: latestSnapshot.disks ?? [],
-      network: showNetwork ? latestSnapshot.network : undefined,
-      gpus: config.trendPanelSections.includes('gpu') ? (latestSnapshot.gpus ?? []) : [],
+      network: showNetworkDetail ? latestSnapshot.network : undefined,
+      gpus: showGpuDetail ? (latestSnapshot.gpus ?? []) : [],
       docker: config.trendPanelSections.includes('docker') ? latestSnapshot.docker : undefined,
       uptimeSeconds: latestSnapshot.uptimeSeconds,
     },

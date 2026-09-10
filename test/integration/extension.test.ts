@@ -37,6 +37,7 @@ suite('Extension activation (integration)', () => {
     assert.equal(cfg.get('criticalThreshold'), 95);
     assert.deepEqual(cfg.get('statusBarMetrics'), ['cpu', 'memory']);
     assert.deepEqual(cfg.get('trendPanelSections'), ['gpu', 'docker']);
+    assert.deepEqual(cfg.get('trendChartMetrics'), ['cpu', 'memory']);
     assert.equal(cfg.get('enableNotifications'), false);
     assert.deepEqual(cfg.get('diskMountPoints'), []);
     // 这两个配置项已经被删掉/合并进 statusBarMetrics、trendPanelSections,这里顺带守一下不要被误加回来。
