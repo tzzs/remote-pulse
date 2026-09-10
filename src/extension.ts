@@ -260,7 +260,11 @@ function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendP
 
   const showCpuChart = config.trendChartMetrics.includes('cpu');
   const showMemoryChart = config.trendChartMetrics.includes('memory');
-  const showGpuChart = config.trendChartMetrics.includes('gpu');
+  // 光勾了 trendChartMetrics 里的 gpu 还不够——没有 nvidia-smi/没装 GPU 时 latestSnapshot.gpus
+  // 永远是空数组,若只看配置就画,`s.gpus?.[0]?.utilizationPercent ?? 0` 兜底出来的 0 会在图上
+  // 变成一条以假乱真、恒定在 0% 的"GPU"线。和状态栏 GPU 项(primaryGpu !== undefined)同一个判断。
+  const hasGpuData = (latestSnapshot?.gpus?.length ?? 0) > 0;
+  const showGpuChart = config.trendChartMetrics.includes('gpu') && hasGpuData;
   const showNetworkChart = config.trendChartMetrics.includes('network');
 
   return {
