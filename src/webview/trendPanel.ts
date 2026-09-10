@@ -252,9 +252,10 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
   if (latest?.uptimeSeconds !== undefined) {
     system.push({ label: vscode.l10n.t('Uptime'), detail: '', value: formatUptime(latest.uptimeSeconds), level: 'normal' });
   }
-  // 每张网卡一行:标签就是网卡名,地址在数值列,和其余指标落在同一条右边线上。
+  // 每张网卡一行:标签是网卡名(eth0/wlan0/docker0 这类),多网卡时靠它互相区分,单看这几个字符
+  // 猜不出是什么意思——detail 列补一句"网络接口",眼睛扫到这行不用先认得 Linux 网卡命名习惯。
   for (const { iface, address } of host.addresses ?? []) {
-    system.push({ label: iface, detail: '', value: address, level: 'normal' });
+    system.push({ label: iface, detail: vscode.l10n.t('Network interface'), value: address, level: 'normal' });
   }
   if (system.length) {
     groups.push({ kind: 'metrics', title: vscode.l10n.t('System'), rows: system });
