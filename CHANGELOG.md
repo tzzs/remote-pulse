@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/tzzs/remote-pulse/compare/v0.1.1...v0.2.0) (2026-09-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* rebuild the trend panel and rework the status bar ([#8](https://github.com/tzzs/remote-pulse/issues/8))
+
+### Features
+
+* add English/Chinese localization for the extension UI ([#6](https://github.com/tzzs/remote-pulse/issues/6)) ([59ddc4a](https://github.com/tzzs/remote-pulse/commit/59ddc4a639a74f995adda53ca9b04706f1e311f9))
+* rebuild the trend panel and rework the status bar ([#8](https://github.com/tzzs/remote-pulse/issues/8)) ([37a3c31](https://github.com/tzzs/remote-pulse/commit/37a3c31c4504bf9ed2c49a9578493f247cc6fdd7))
+
 ## [0.1.1](https://github.com/tzzs/remote-pulse/compare/v0.1.0...v0.1.1) (2026-09-05)
 
 
