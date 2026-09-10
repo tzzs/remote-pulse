@@ -3,7 +3,6 @@ import { DiskStats, MountEntry } from '../types';
 import { isPathReadable } from '../util/platform';
 
 const PROC_MOUNTS = '/proc/mounts';
-const DEFAULT_TOP_N = 3;
 
 /** 虚拟/伪文件系统,不代表真实磁盘容量,展示这些挂载点对用户没有意义。 */
 const IGNORED_FS_TYPES = new Set([
@@ -66,7 +65,9 @@ export class DiskCollector {
     if (configured.length > 0) {
       return valid;
     }
-    return valid.sort((a, b) => b.percent - a.percent).slice(0, DEFAULT_TOP_N);
+    // 自动发现时展示全部真实挂载点(已经过滤掉虚拟文件系统),不再只挑使用率最高的几个——
+    // 按使用率降序排,只是为了让最该关注的挂载点排在前面,不代表其余的就不展示了。
+    return valid.sort((a, b) => b.percent - a.percent);
   }
 
   private async autoDiscoverMountPoints(): Promise<string[]> {

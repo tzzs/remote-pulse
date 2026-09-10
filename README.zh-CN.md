@@ -38,7 +38,7 @@ CPU、内存、GPU(仅第一张卡)、网络最多可以是四个独立着色的
 
 - **CPU**:总体使用率、核心数(`/proc/stat` 增量算法,非 loadavg)
 - **内存**:使用率、已用/总量(`MemAvailable` 而非 `MemFree`,更贴近真实可用内存)
-- **磁盘**:各挂载点使用率(自动过滤虚拟文件系统,默认展示使用率 Top 3,或手动指定挂载点)
+- **磁盘**:各挂载点使用率(自动过滤虚拟文件系统,默认展示全部真实挂载点、按使用率从高到低排,或手动指定挂载点只看这几个)
 - **网络**:下载/上传速率,任何地方都是分开展示两个数(状态栏图标、图表线条、箭头),从不合并成一个数——合并了就看不出哪个方向在跑流量;可选画进过去 30 分钟图表(下载/上传各一条线,共用同一段独立右侧坐标轴,按窗口内两条线里较大的峰值一起归一化,因为网络速率不像 CPU/内存那样天然有 0-100% 的上限),通过 `trendChartMetrics` 单独控制,默认关闭,且和网络速率是否以文字行展示是两码事
 - **GPU**:显存占用、利用率、温度(需要 `nvidia-smi`,不存在则模块整体不激活)
 - **Docker**:运行中容器数与各容器 CPU/内存占用(需要可访问 `/var/run/docker.sock`,无权限则静默降级)
@@ -76,7 +76,7 @@ code --install-extension remote-pulse-0.1.0.vsix
 | `remotePulse.trendPanelSections` | `["gpu", "docker"]` | 趋势面板正文要展示哪些可选区块/行(GPU 卡片、Docker 表格、"System"里的网络那一行);System 和 Storage 始终展示。和 `trendChartMetrics` 相互独立,不影响图表。运行「Remote Pulse: 配置趋势面板板块」获得真正的多选勾选框 |
 | `remotePulse.trendChartMetrics` | `["cpu", "memory"]` | 30 分钟折线图里要画哪几条线——`cpu`、`memory`、`gpu`(仅第一张卡)、`network`(下载/上传各一条线,共用独立右侧坐标轴)。和 `trendPanelSections`、`statusBarMetrics` 相互独立。运行「Remote Pulse: 配置趋势图指标」获得真正的多选勾选框 |
 | `remotePulse.enableNotifications` | `false` | 越过严重阈值时是否弹出系统通知 |
-| `remotePulse.diskMountPoints` | `[]` | 指定要监控的挂载点,留空则自动选 Top 3 |
+| `remotePulse.diskMountPoints` | `[]` | 指定要监控的挂载点,留空则展示全部真实挂载点(按使用率从高到低排) |
 
 ## 命令
 

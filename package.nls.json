@@ -28,5 +28,5 @@
   "config.trendChartMetrics.gpu.description": "GPU utilization of the primary GPU only (requires nvidia-smi)",
   "config.trendChartMetrics.network.description": "Network download/upload rate, plotted as two separate lines on their own right-hand axis",
   "config.enableNotifications.description": "Whether to show a system notification when the critical threshold is crossed",
-  "config.diskMountPoints.description": "Disk mount points to monitor; leave empty to auto-select the one with the highest usage"
+  "config.diskMountPoints.description": "Disk mount points to monitor; leave empty to show every real mount point, sorted by usage"
 }

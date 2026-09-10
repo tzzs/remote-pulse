@@ -38,7 +38,7 @@ Three settings share the same four candidate metrics (`cpu`/`memory`/`gpu`/`netw
 
 - **CPU**: overall usage and core count (delta-based `/proc/stat` calculation, not loadavg)
 - **Memory**: usage percentage and used/total (uses `MemAvailable` rather than `MemFree`, which better reflects what's actually available)
-- **Disk**: per-mount-point usage (virtual filesystems are filtered out automatically; shows the top 3 by usage by default, or specify mount points manually)
+- **Disk**: per-mount-point usage (virtual filesystems are filtered out automatically; shows every real mount point by default, sorted by usage so the fullest one leads, or specify mount points manually to show only those)
 - **Network**: download/upload rate, always shown as two separate numbers (status bar icons, chart lines, or arrows) rather than a combined figure — merging them hides which direction is actually busy; optionally plotted as two lines in the 30-minute chart sharing their own right-hand axis, scaled to the window's own peak since throughput has no natural 0-100% scale like CPU/memory (off by default via `trendChartMetrics`, independent of whether the rate is shown as a detail row)
 - **GPU**: VRAM usage, utilization, temperature (requires `nvidia-smi`; the module simply stays inactive if it's unavailable)
 - **Docker**: running container count plus per-container CPU/memory usage (requires access to `/var/run/docker.sock`; degrades silently without permission)
@@ -76,7 +76,7 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 | `remotePulse.trendPanelSections` | `["gpu", "docker"]` | Which optional sections/rows to show in the trend panel body (GPU cards, Docker table, the network row in "System"); System and Storage are always shown. Independent of `trendChartMetrics` — this doesn't affect the chart. Run `Remote Pulse: Configure Trend Panel Sections` for a real multi-select picker |
 | `remotePulse.trendChartMetrics` | `["cpu", "memory"]` | Which metrics to plot as lines in the trend panel's 30-minute chart — `cpu`, `memory`, `gpu` (primary GPU only), `network` (download and upload as two separate lines sharing their own right-hand axis). Independent of `trendPanelSections` and `statusBarMetrics`. Run `Remote Pulse: Configure Trend Chart Metrics` for a real multi-select picker |
 | `remotePulse.enableNotifications` | `false` | Whether to show a system notification when the critical threshold is crossed |
-| `remotePulse.diskMountPoints` | `[]` | Mount points to monitor; leave empty to auto-select the top 3 by usage |
+| `remotePulse.diskMountPoints` | `[]` | Mount points to monitor; leave empty to show every real mount point, sorted by usage |
 
 ## Commands
 

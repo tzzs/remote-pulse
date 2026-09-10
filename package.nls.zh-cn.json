@@ -28,5 +28,5 @@
   "config.trendChartMetrics.gpu.description": "仅第一张 GPU 的利用率(需要 nvidia-smi)",
   "config.trendChartMetrics.network.description": "网络下载/上传速率,各画一条线,共用独立的右侧坐标轴",
   "config.enableNotifications.description": "越过严重阈值时是否弹出系统通知",
-  "config.diskMountPoints.description": "指定要监控的磁盘挂载点,留空则自动选择使用率最高的挂载点"
+  "config.diskMountPoints.description": "指定要监控的磁盘挂载点,留空则展示全部真实挂载点(按使用率从高到低排)"
 }
