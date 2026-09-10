@@ -2,7 +2,7 @@
   "name": "remote-pulse",
   "displayName": "Remote Pulse",
   "description": "%extension.description%",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "tanzz",
   "license": "MIT",
   "engines": {
@@ -105,7 +105,12 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["cpu", "memory", "gpu", "network"],
+            "enum": [
+              "cpu",
+              "memory",
+              "gpu",
+              "network"
+            ],
             "enumDescriptions": [
               "%config.statusBarMetrics.cpu.description%",
               "%config.statusBarMetrics.memory.description%",
@@ -114,7 +119,10 @@
             ]
           },
           "uniqueItems": true,
-          "default": ["cpu", "memory"],
+          "default": [
+            "cpu",
+            "memory"
+          ],
           "description": "%config.statusBarMetrics.description%",
           "markdownDescription": "%config.statusBarMetrics.markdownDescription%"
         },
@@ -122,7 +130,11 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["network", "gpu", "docker"],
+            "enum": [
+              "network",
+              "gpu",
+              "docker"
+            ],
             "enumDescriptions": [
               "%config.trendPanelSections.network.description%",
               "%config.trendPanelSections.gpu.description%",
@@ -130,7 +142,10 @@
             ]
           },
           "uniqueItems": true,
-          "default": ["gpu", "docker"],
+          "default": [
+            "gpu",
+            "docker"
+          ],
           "description": "%config.trendPanelSections.description%",
           "markdownDescription": "%config.trendPanelSections.markdownDescription%"
         },
@@ -138,7 +153,12 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["cpu", "memory", "gpu", "network"],
+            "enum": [
+              "cpu",
+              "memory",
+              "gpu",
+              "network"
+            ],
             "enumDescriptions": [
               "%config.trendChartMetrics.cpu.description%",
               "%config.trendChartMetrics.memory.description%",
@@ -147,7 +167,10 @@
             ]
           },
           "uniqueItems": true,
-          "default": ["cpu", "memory"],
+          "default": [
+            "cpu",
+            "memory"
+          ],
           "description": "%config.trendChartMetrics.description%",
           "markdownDescription": "%config.trendChartMetrics.markdownDescription%"
         },
