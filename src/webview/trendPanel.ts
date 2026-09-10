@@ -89,7 +89,10 @@ type PanelGroup =
 interface PanelModel {
   host: { name: string; meta: string; user?: string };
   updated: string;
+  /** 按钮的 title/aria-label,完整描述用——"Remote Pulse Settings"。 */
   settingsLabel: string;
+  /** 齿轮图标旁边显示的短文字,和 settingsLabel 分开是因为标题栏寸土寸金,"Settings"一个词就够了。 */
+  settingsText: string;
   groups: PanelGroup[];
   series: { timestamps: number[]; cpu?: number[]; memory?: number[]; gpu?: number[]; networkRx?: number[]; networkTx?: number[] };
 }
@@ -363,6 +366,7 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
     host: { ...splitHostLabel(host.label), user: host.user },
     updated: vscode.l10n.t('Updated {0}', updatedAt),
     settingsLabel: vscode.l10n.t('Remote Pulse Settings'),
+    settingsText: vscode.l10n.t('Settings'),
     groups,
     series: {
       timestamps: series.timestamps,
@@ -416,12 +420,15 @@ const PANEL_CSS = `
   .host-meta { font-size: 11px; line-height: 16px; color: var(--rp-muted); min-width: 0;
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .host-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  .icon-btn { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
-              padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--rp-muted);
-              cursor: pointer; }
+  /* 纯图标按钮原本是个 22x22 的正方形;现在齿轮旁边要带一句"Settings"文字,改成自适应宽度、
+     图标和文字之间留个 gap——光有一个小齿轮图标,不点点看根本猜不出这是设置入口。 */
+  .icon-btn { display: flex; align-items: center; justify-content: center; gap: 5px; height: 22px;
+              padding: 0 7px 0 5px; border: none; border-radius: 4px; background: transparent; color: var(--rp-muted);
+              font-family: inherit; font-size: 11px; line-height: 16px; white-space: nowrap; cursor: pointer; }
   .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
                      color: var(--vscode-foreground); }
   .icon-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  .icon-btn svg { flex-shrink: 0; }
 
   .section { margin-top: 26px; }
   .section-head { display: flex; align-items: center; gap: 8px; min-height: 20px;
@@ -665,6 +672,9 @@ const PANEL_SCRIPT = `
     settingsBtn.title = m.settingsLabel;
     settingsBtn.setAttribute('aria-label', m.settingsLabel);
     settingsBtn.appendChild(gearIcon());
+    // 文字和图标是同一个 <button>,不是拼在旁边的两个元素——光一个小齿轮图标不点点看猜不出
+    // 是设置入口,但点击范围必须和图标绑在一起,不能出现"点文字没反应,只有图标能点"的割裂体验。
+    settingsBtn.appendChild(el('span', '', m.settingsText));
     settingsBtn.addEventListener('click', function () { vscode.postMessage({ type: 'openSettings' }); });
     actions.appendChild(settingsBtn);
     host.appendChild(actions);
