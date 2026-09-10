@@ -33,6 +33,8 @@
   "Network transfer rate": "网络传输速率",
   "Choose which optional sections to show in the trend panel": "选择趋势面板要展示哪些可选区块",
   "Choose which metrics to plot as lines in the trend chart": "选择趋势图里要画哪几条线",
+  "Download": "下载",
+  "Upload": "上传",
   "Utilization": "使用率",
   "System": "系统",
   "Storage": "存储",

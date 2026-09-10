@@ -15,7 +15,7 @@
   "config.statusBarMetrics.cpu.description": "CPU usage",
   "config.statusBarMetrics.memory.description": "Memory usage",
   "config.statusBarMetrics.gpu.description": "GPU utilization of the primary GPU only (requires nvidia-smi); all GPUs still appear in the trend panel",
-  "config.statusBarMetrics.network.description": "Combined network upload+download rate; per-direction detail still appears in the trend panel",
+  "config.statusBarMetrics.network.description": "Network download/upload rate, shown separately with arrow icons",
   "config.trendPanelSections.description": "Which optional sections to show in the trend panel; System and Storage are always shown. Run \"Remote Pulse: Configure Trend Panel Sections\" from the Command Palette to pick from all options at once.",
   "config.trendPanelSections.markdownDescription": "Which optional sections to show in the trend panel; System and Storage are always shown. Run `Remote Pulse: Configure Trend Panel Sections` from the Command Palette to pick from all options at once.",
   "config.trendPanelSections.network.description": "Network upload/download rate, shown as a row in the panel's System section",
@@ -26,7 +26,7 @@
   "config.trendChartMetrics.cpu.description": "CPU usage",
   "config.trendChartMetrics.memory.description": "Memory usage",
   "config.trendChartMetrics.gpu.description": "GPU utilization of the primary GPU only (requires nvidia-smi)",
-  "config.trendChartMetrics.network.description": "Combined network upload+download rate, plotted on its own right-hand axis",
+  "config.trendChartMetrics.network.description": "Network download/upload rate, plotted as two separate lines on their own right-hand axis",
   "config.enableNotifications.description": "Whether to show a system notification when the critical threshold is crossed",
   "config.diskMountPoints.description": "Disk mount points to monitor; leave empty to auto-select the one with the highest usage"
 }

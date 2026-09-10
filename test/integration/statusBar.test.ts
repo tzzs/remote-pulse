@@ -209,15 +209,16 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(bar.debugState.network.visible, false);
   });
 
-  test('Network item shows the combined rx+tx rate and never takes an alert color', () => {
+  test('Network item shows download and upload separately with arrow icons, and never takes an alert color', () => {
     bar = new PulseStatusBar();
     bar.update(
-      snapshotWith({ network: { rxRate: 900_000, txRate: 900_000 } }),
+      snapshotWith({ network: { rxRate: 900_000, txRate: 12_000 } }),
       baseConfig({ statusBarMetrics: ['cpu', 'memory', 'network'] }),
       'ok',
     );
     assert.equal(bar.debugState.network.visible, true);
-    assert.equal(bar.debugState.network.text, 'NET 1.7 MB/s');
+    // 分开标 arrow-down/arrow-up,而不是把上下行加在一起,不然分不清到底是在上传还是下载。
+    assert.equal(bar.debugState.network.text, '$(arrow-down) 878.9 KB/s $(arrow-up) 11.7 KB/s');
     assert.equal(bar.debugState.network.color, undefined);
     assert.equal(bar.debugState.network.backgroundColor, undefined);
     // 网络没有告警语义,不该把图标带成红色——即使数值很大。

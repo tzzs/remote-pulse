@@ -189,7 +189,8 @@ export class PulseStatusBar {
     }
 
     if (showNetwork && snapshot.network) {
-      this.networkItem.text = `NET ${formatRate(snapshot.network.rxRate + snapshot.network.txRate)}`;
+      // 合并成一个数字看不出是上传还是下载,分开标 $(arrow-down)/$(arrow-up) 才对得上"网速"这个直觉。
+      this.networkItem.text = `$(arrow-down) ${formatRate(snapshot.network.rxRate)} $(arrow-up) ${formatRate(snapshot.network.txRate)}`;
       this.networkItem.color = undefined;
       this.networkItem.backgroundColor = undefined;
       this.networkItem.show();

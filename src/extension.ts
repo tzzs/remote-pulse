@@ -270,9 +270,11 @@ function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendP
       memory: showMemoryChart ? windowed.map(s => s.memory?.percent ?? 0) : undefined,
       // 只取第一张 GPU(和状态栏摘要同一个"主卡"约定),多卡详情仍然只在 GPU 详情区块里能看到。
       gpu: showGpuChart ? windowed.map(s => s.gpus?.[0]?.utilizationPercent ?? 0) : undefined,
-      // rx+tx 之和,原始 B/s——不做归一化,趋势面板画在自己独立的右侧 y 轴上,
+      // 上传/下载分两个数组,不再合成 rx+tx 一条线——合并了就分不清方向,和状态栏网络项拆成
+      // 上下行两截是同一个理由。原始 B/s,不做归一化,趋势面板画在自己独立的右侧 y 轴上,
       // 不用挤进 CPU/内存共用的 0-100% 左轴。
-      network: showNetworkChart ? windowed.map(s => (s.network ? s.network.rxRate + s.network.txRate : 0)) : undefined,
+      networkRx: showNetworkChart ? windowed.map(s => s.network?.rxRate ?? 0) : undefined,
+      networkTx: showNetworkChart ? windowed.map(s => s.network?.txRate ?? 0) : undefined,
     },
     latest: latestSnapshot && {
       cpu: latestSnapshot.cpu,

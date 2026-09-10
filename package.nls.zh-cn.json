@@ -15,7 +15,7 @@
   "config.statusBarMetrics.cpu.description": "CPU 使用率",
   "config.statusBarMetrics.memory.description": "内存使用率",
   "config.statusBarMetrics.gpu.description": "仅第一张 GPU 的利用率(需要 nvidia-smi);全部 GPU 的详细信息仍然在趋势面板里能看到",
-  "config.statusBarMetrics.network.description": "上下行合计速率;分方向的详细数据仍然在趋势面板里能看到",
+  "config.statusBarMetrics.network.description": "网络下载/上传速率,用箭头图标分开展示",
   "config.trendPanelSections.description": "趋势面板要展示哪些可选区块;System 和 Storage 始终展示。在命令面板运行\"Remote Pulse: 配置趋势面板板块\"可一次性勾选所有选项。",
   "config.trendPanelSections.markdownDescription": "趋势面板要展示哪些可选区块;System 和 Storage 始终展示。在命令面板运行 `Remote Pulse: 配置趋势面板板块` 可一次性勾选所有选项。",
   "config.trendPanelSections.network.description": "网络上下行速率,在面板 System 区块里以一行文字展示",
@@ -26,7 +26,7 @@
   "config.trendChartMetrics.cpu.description": "CPU 使用率",
   "config.trendChartMetrics.memory.description": "内存使用率",
   "config.trendChartMetrics.gpu.description": "仅第一张 GPU 的利用率(需要 nvidia-smi)",
-  "config.trendChartMetrics.network.description": "上下行合计速率,画在自己独立的右侧坐标轴上",
+  "config.trendChartMetrics.network.description": "网络下载/上传速率,各画一条线,共用独立的右侧坐标轴",
   "config.enableNotifications.description": "越过严重阈值时是否弹出系统通知",
   "config.diskMountPoints.description": "指定要监控的磁盘挂载点,留空则自动选择使用率最高的挂载点"
 }

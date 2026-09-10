@@ -21,10 +21,12 @@ export interface TrendSeries {
   cpu?: number[];
   memory?: number[];
   /**
-   * rx+tx 之和,单位 B/s,原始值不做归一化——网络速率没有 CPU/内存那种天然的 0-100% 上限,
-   * 画图时走独立的右侧 y 轴(自己的量纲),而不是硬挤进 CPU/内存共用的百分比左轴。
+   * 上传/下载分开两条线,而不是 rx+tx 加在一起——合并成一个数就分不清是在上传还是下载了
+   * (状态栏的网络项也是同样的理由拆开的)。单位 B/s,原始值不做归一化,画图时两条线共用
+   * 独立的右侧 y 轴(自己的量纲),而不是硬挤进 CPU/内存共用的百分比左轴。
    */
-  network?: number[];
+  networkRx?: number[];
+  networkTx?: number[];
   /** 只取第一张 GPU(和状态栏摘要同一个"主卡"约定),多卡详情仍然只在 GPU 详情区块里能看到。 */
   gpu?: number[];
 }
@@ -73,7 +75,7 @@ interface MetricRow {
 interface ChartLegendItem {
   /** 客户端靠这个 key(而不是数组下标)去 SERIES_DEFS 里找颜色/className——
    * 一旦某条线可以被单独勾掉,"第 i 个图例对应第 i 个预定义线"这个位置假设就不成立了。 */
-  key: 'cpu' | 'memory' | 'network' | 'gpu';
+  key: 'cpu' | 'memory' | 'gpu' | 'networkRx' | 'networkTx';
   name: string;
   /** 最新一次采集的即时值,和图表末端的圆点是同一个数,不随悬浮变化。 */
   value?: string;
@@ -89,7 +91,7 @@ interface PanelModel {
   updated: string;
   settingsLabel: string;
   groups: PanelGroup[];
-  series: { timestamps: number[]; cpu?: number[]; memory?: number[]; network?: number[]; gpu?: number[] };
+  series: { timestamps: number[]; cpu?: number[]; memory?: number[]; gpu?: number[]; networkRx?: number[]; networkTx?: number[] };
 }
 
 /**
@@ -277,9 +279,16 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
     const value = lastOf(series.gpu);
     legend.push({ key: 'gpu', name: 'GPU', value: value !== undefined ? `${Math.round(value)}%` : undefined });
   }
-  if (series.network) {
-    const value = lastOf(series.network);
-    legend.push({ key: 'network', name: vscode.l10n.t('Network'), value: value !== undefined ? formatRate(value) : undefined });
+  // 上传/下载各画一条线、各一条图例——合并成一个数就分不清是在上传还是下载,和状态栏网络项
+  // 拆成 $(arrow-down)/$(arrow-up) 两截是同一个理由。两条线共享同一段右轴,domain 由
+  // PANEL_SCRIPT 里 niceMax(Math.max(rx 峰值, tx 峰值)) 统一算,不能各自独立取峰值。
+  if (series.networkRx) {
+    const value = lastOf(series.networkRx);
+    legend.push({ key: 'networkRx', name: `↓ ${vscode.l10n.t('Download')}`, value: value !== undefined ? formatRate(value) : undefined });
+  }
+  if (series.networkTx) {
+    const value = lastOf(series.networkTx);
+    legend.push({ key: 'networkTx', name: `↑ ${vscode.l10n.t('Upload')}`, value: value !== undefined ? formatRate(value) : undefined });
   }
   groups.push({
     kind: 'chart',
@@ -358,8 +367,9 @@ function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
       timestamps: series.timestamps,
       cpu: series.cpu,
       memory: series.memory,
-      network: series.network,
       gpu: series.gpu,
+      networkRx: series.networkRx,
+      networkTx: series.networkTx,
     },
   };
 }
@@ -378,7 +388,8 @@ const PANEL_CSS = `
     --rp-critical: var(--vscode-editorError-foreground, #f14c4c);
     --rp-cpu: var(--vscode-charts-blue, #3794ff);
     --rp-mem: var(--vscode-charts-purple, #b180d7);
-    --rp-net: var(--vscode-charts-green, #89d185);
+    --rp-net-rx: var(--vscode-charts-green, #89d185);
+    --rp-net-tx: var(--vscode-charts-yellow, #cca700);
     --rp-gpu: var(--vscode-charts-orange, #d18616);
   }
   body {
@@ -461,7 +472,8 @@ const PANEL_CSS = `
   .chart .cpu { fill: none; stroke: var(--rp-cpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .mem { fill: none; stroke: var(--rp-mem); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .gpu { fill: none; stroke: var(--rp-gpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
-  .chart .net { fill: none; stroke: var(--rp-net); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .net-rx { fill: none; stroke: var(--rp-net-rx); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .net-tx { fill: none; stroke: var(--rp-net-tx); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 3 2; }
   .chart .guide { stroke: var(--rp-muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; pointer-events: none; }
   .chart .hover-dot { opacity: 0; pointer-events: none; }
   .hint { font-size: 11px; line-height: 16px; color: var(--rp-muted); margin: 6px 0 0; }
@@ -512,13 +524,15 @@ const PANEL_SCRIPT = `
   let chartEl = null;
   let chartHint = null;
   let chartTooltip = null;
-  /** cpu/memory/gpu/network 四条线各自的颜色/className——remotePulse.trendChartMetrics 决定实际画哪几条,
-      chartActiveDefs 按 key 而不是数组下标去这里查,顺序无关。 */
+  /** cpu/memory/gpu/networkRx/networkTx 最多五条线各自的颜色/className——remotePulse.trendChartMetrics
+      决定实际画哪几条,chartActiveDefs 按 key 而不是数组下标去这里查,顺序无关。上传/下载分成两条线
+      (而不是 rx+tx 加在一起画一条),原因和状态栏网络项拆成 $(arrow-down)/$(arrow-up) 一样:合并了就分不清方向。 */
   var SERIES_DEFS = [
     { key: 'cpu', colorVar: 'var(--rp-cpu)', className: 'cpu' },
     { key: 'memory', colorVar: 'var(--rp-mem)', className: 'mem' },
     { key: 'gpu', colorVar: 'var(--rp-gpu)', className: 'gpu' },
-    { key: 'network', colorVar: 'var(--rp-net)', className: 'net' },
+    { key: 'networkRx', colorVar: 'var(--rp-net-rx)', className: 'net-rx' },
+    { key: 'networkTx', colorVar: 'var(--rp-net-tx)', className: 'net-tx' },
   ];
   let chartActiveDefs = SERIES_DEFS.slice(0, 2);
   /** 悬浮态跨轮询保留:每 2 秒的重绘会重建折线和圆点,如果不在重绘后把悬浮指示器按住原位置
@@ -816,9 +830,9 @@ const PANEL_SCRIPT = `
     if (chartTooltip) chartTooltip.style.display = 'none';
   }
 
-  /** CPU/内存是 0-100 的百分比;network 是原始 B/s,走右轴自己的量纲,两者都不需要互相换算。 */
+  /** CPU/内存/GPU 是 0-100 的百分比;上传/下载是原始 B/s,走右轴自己的量纲,不需要互相换算。 */
   function formatSeriesValue(def, value) {
-    if (def.key === 'network') {
+    if (def.key === 'networkRx' || def.key === 'networkTx') {
       return formatRateJs(Math.max(0, value));
     }
     return Math.round(Math.max(0, Math.min(100, value))) + '%';
@@ -916,11 +930,12 @@ const PANEL_SCRIPT = `
     if (key === 'cpu') return series.cpu || [];
     if (key === 'memory') return series.memory || [];
     if (key === 'gpu') return series.gpu || [];
-    if (key === 'network') return series.network || [];
+    if (key === 'networkRx') return series.networkRx || [];
+    if (key === 'networkTx') return series.networkTx || [];
     return [];
   }
 
-  /** cpu/memory/gpu 都是 0-100% 的左轴;network 走自己的右轴量纲(domain.max 由 niceMax() 决定)。 */
+  /** cpu/memory/gpu 都是 0-100% 的左轴;上传/下载共用右轴的同一段量纲(domain.max 由 niceMax() 决定)。 */
   function toY(value, domain, top, plotH) {
     const v = Math.max(domain.min, Math.min(domain.max, value));
     const range = domain.max - domain.min || 1;
@@ -950,9 +965,10 @@ const PANEL_SCRIPT = `
     chartEl.setAttribute('height', String(height));
     chartEl.replaceChildren();
 
-    // network 走独立的右侧 y 轴(自己的量纲,不是百分比)——右边多留出画刻度文字的空间;
+    // 上传/下载共用同一条独立的右侧 y 轴(自己的量纲,不是百分比)——右边多留出画刻度文字的空间;
     // 末端圆点的圆心如果落在视口边界上,半径里有一半会被裁掉,rightPad 同时兜住这个安全边距。
-    const hasNetworkAxis = chartActiveDefs.some(function (def) { return def.key === 'network'; });
+    const isNetworkKey = function (key) { return key === 'networkRx' || key === 'networkTx'; };
+    const hasNetworkAxis = chartActiveDefs.some(function (def) { return isNetworkKey(def.key); });
     const endDotRadius = 2.5;
     // 最长的右轴标签("1023.9 KB/s"这类进位前的边界值)在 11px 字号下量出来约 66px 宽,
     // 78 留了安全余量——字号不随窄屏缩小,所以窄屏也不能比宽屏少留。
@@ -966,12 +982,19 @@ const PANEL_SCRIPT = `
     const xs = [];
     for (let i = 0; i < count; i++) xs.push(gutter + (span * i) / (count - 1));
 
-    // cpu/memory 共用左轴的 0-100% 量纲;network 没有天然上限,按这一屏数据的峰值取整成
-    // 好看的刻度上限(niceMax),画在右轴上——两根轴各管各的,线不会因为量纲不同而挤在一起。
-    const domains = chartActiveDefs.map(function (def, i) {
-      if (def.key === 'network') {
-        const raw = downsampled[i].length ? Math.max.apply(null, downsampled[i]) : 0;
-        return { min: 0, max: niceMax(raw) };
+    // cpu/memory/gpu 共用左轴的 0-100% 量纲;上传/下载没有天然上限,按这一屏两条线里较大的
+    // 那个峰值一起取整成好看的刻度上限(niceMax)——必须用同一个 max,不然上传线和下载线各按
+    // 各的峰值伸缩,同样的字节数在图上会画出不一样的高度,读者会看错谁比谁快。
+    var networkPeak = 0;
+    chartActiveDefs.forEach(function (def, i) {
+      if (isNetworkKey(def.key) && downsampled[i].length) {
+        networkPeak = Math.max(networkPeak, Math.max.apply(null, downsampled[i]));
+      }
+    });
+    const networkDomain = { min: 0, max: niceMax(networkPeak) };
+    const domains = chartActiveDefs.map(function (def) {
+      if (isNetworkKey(def.key)) {
+        return networkDomain;
       }
       return { min: 0, max: 100 };
     });
@@ -987,8 +1010,7 @@ const PANEL_SCRIPT = `
       chartEl.appendChild(label);
     }
     if (hasNetworkAxis) {
-      const netDomain = domains[chartActiveDefs.map(function (d) { return d.key; }).indexOf('network')];
-      const rightMarks = [[top, netDomain.max], [top + plotH / 2, netDomain.max / 2], [top + plotH, 0]];
+      const rightMarks = [[top, networkDomain.max], [top + plotH / 2, networkDomain.max / 2], [top + plotH, 0]];
       for (const mark of rightMarks) {
         const label = svg('text', { class: 'axis', x: plotRight + 8, y: mark[0], 'text-anchor': 'start', 'dominant-baseline': 'middle' });
         label.textContent = formatRateJs(mark[1]);
@@ -1008,7 +1030,7 @@ const PANEL_SCRIPT = `
         cx: xs[xs.length - 1], cy: toY(values[values.length - 1], domain, top, plotH), r: endDotRadius, fill: colorVar,
       }));
     }
-    // 倒序画(network、memory、cpu):cpu 最受关注,压在最上层不被其他线盖住。
+    // 按 legend 顺序(cpu, memory, gpu, 下载, 上传)倒序画:cpu 最受关注,压在最上层不被其他线盖住。
     for (let i = chartActiveDefs.length - 1; i >= 0; i--) {
       line(downsampled[i], chartActiveDefs[i].className, chartActiveDefs[i].colorVar, domains[i]);
     }
