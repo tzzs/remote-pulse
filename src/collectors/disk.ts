@@ -52,6 +52,33 @@ async function readDiskUsage(mountPoint: string): Promise<DiskStats | undefined>
   }
 }
 
+function pathDepth(mountPoint: string): number {
+  return mountPoint.split('/').filter(Boolean).length;
+}
+
+/**
+ * 同一块底层存储经常被挂载在不止一个路径下——WSL2 的 /mnt/wslg/distro 是发行版根文件系统的
+ * bind mount,和 / 是同一块盘;/usr/lib/wsl/drivers 挂的是 Windows C 盘,和 /mnt/c 也是同一块。
+ * Node 的 fs.statfs 不暴露设备号之类能直接判断"同一个文件系统"的字段,但 total/used 字节数
+ * 完全相同这件事本身概率极低,足够当作"同一块盘"的判据。撞上了就留路径更浅的那个——
+ * bind mount 的目标路径几乎总是比源路径更深,浅路径更接近用户会关心的那个"名字"。
+ */
+export function dedupeByCapacity(disks: DiskStats[]): DiskStats[] {
+  const byCapacity = new Map<string, DiskStats>();
+  for (const disk of disks) {
+    const key = `${disk.total}:${disk.used}`;
+    const existing = byCapacity.get(key);
+    if (
+      !existing ||
+      pathDepth(disk.mountPoint) < pathDepth(existing.mountPoint) ||
+      (pathDepth(disk.mountPoint) === pathDepth(existing.mountPoint) && disk.mountPoint < existing.mountPoint)
+    ) {
+      byCapacity.set(key, disk);
+    }
+  }
+  return Array.from(byCapacity.values());
+}
+
 export class DiskCollector {
   constructor(private readonly configuredMountPoints: () => string[]) {}
 
@@ -63,11 +90,13 @@ export class DiskCollector {
     const valid = results.filter((s): s is DiskStats => s !== undefined);
 
     if (configured.length > 0) {
+      // 用户手动列出的挂载点,即使其中几个其实是同一块盘也原样展示——是不是重复由用户自己判断,
+      // 这里不替用户做主砍掉他明确列出来的路径。
       return valid;
     }
-    // 自动发现时展示全部真实挂载点(已经过滤掉虚拟文件系统),不再只挑使用率最高的几个——
-    // 按使用率降序排,只是为了让最该关注的挂载点排在前面,不代表其余的就不展示了。
-    return valid.sort((a, b) => b.percent - a.percent);
+    // 自动发现时展示全部真实挂载点(已经过滤掉虚拟文件系统 + 同一块盘的重复挂载),不再只挑
+    // 使用率最高的几个——按使用率降序排,只是为了让最该关注的挂载点排在前面。
+    return dedupeByCapacity(valid).sort((a, b) => b.percent - a.percent);
   }
 
   private async autoDiscoverMountPoints(): Promise<string[]> {

@@ -38,7 +38,7 @@ Three settings share the same four candidate metrics (`cpu`/`memory`/`gpu`/`netw
 
 - **CPU**: overall usage and core count (delta-based `/proc/stat` calculation, not loadavg)
 - **Memory**: usage percentage and used/total (uses `MemAvailable` rather than `MemFree`, which better reflects what's actually available)
-- **Disk**: per-mount-point usage (virtual filesystems are filtered out automatically; shows every real mount point by default, sorted by usage so the fullest one leads, or specify mount points manually to show only those)
+- **Disk**: per-mount-point usage (virtual filesystems are filtered out automatically, and mount points that report byte-identical total/used space — the same underlying disk bind-mounted at more than one path, e.g. WSL2's `/mnt/wslg/distro` mirroring `/` — are collapsed to whichever path is shallower; shows every remaining real mount point by default, sorted by usage so the fullest one leads, or specify mount points manually to show only those)
 - **Network**: download/upload rate, always shown as two separate numbers (status bar icons, chart lines, or arrows) rather than a combined figure — merging them hides which direction is actually busy; optionally plotted as two lines in the 30-minute chart sharing their own right-hand axis, scaled to the window's own peak since throughput has no natural 0-100% scale like CPU/memory (off by default via `trendChartMetrics`, independent of whether the rate is shown as a detail row)
 - **GPU**: VRAM usage, utilization, temperature (requires `nvidia-smi`; the module simply stays inactive if it's unavailable)
 - **Docker**: running container count plus per-container CPU/memory usage (requires access to `/var/run/docker.sock`; degrades silently without permission)
