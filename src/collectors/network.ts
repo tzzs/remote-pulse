@@ -5,7 +5,18 @@ import { isPathReadable } from '../util/platform';
 const PROC_NET_DEV = '/proc/net/dev';
 
 /**
- * 解析 /proc/net/dev,累加除回环接口(lo)外所有网卡的收发字节数。
+ * 回环 + 桥接/虚拟接口:容器间通信(docker0、veth 对、br-xxx 网桥)、隧道(tap 设备、virbr0)
+ * 的流量根本不出本机网卡,算进"网速"会把本机对外吞吐虚高一大截。
+ * 这些虚拟接口挂到主桥上时流量还会被重复计一次,所以整类按前缀排除。
+ */
+const VIRTUAL_IFACE_PREFIXES = ['lo', 'veth', 'docker', 'br-', 'virbr', 'tap', 'dummy'];
+
+export function isVirtualInterface(iface: string): boolean {
+  return VIRTUAL_IFACE_PREFIXES.some(prefix => iface === prefix || iface.startsWith(prefix));
+}
+
+/**
+ * 解析 /proc/net/dev,累加所有物理/对外接口(排除回环和虚拟接口,见 VIRTUAL_IFACE_PREFIXES)的收发字节数。
  * 格式(跳过前两行表头): iface: rxBytes rxPackets ... txBytes txPackets ...
  */
 export function parseNetDev(content: string): NetSample {
@@ -22,7 +33,7 @@ export function parseNetDev(content: string): NetSample {
       continue;
     }
     const iface = line.slice(0, colonIndex).trim();
-    if (iface === 'lo') {
+    if (isVirtualInterface(iface)) {
       continue;
     }
     const fields = line.slice(colonIndex + 1).trim().split(/\s+/).map(Number);

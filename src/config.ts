@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 
-export type StatusBarMetric = 'cpu' | 'memory' | 'gpu' | 'network';
+export type StatusBarMetric = 'cpu' | 'memory' | 'disk' | 'gpu' | 'network';
 export type TrendPanelSection = 'network' | 'gpu' | 'docker';
 /** 折线图里画哪几条线,和 trendPanelSections(GPU 详情区块/Docker 表格是否出现)、
  * statusBarMetrics(状态栏摘要数字)各自独立——三处配置的候选指标故意保持同一套名字
- * (cpu/memory/gpu/network 的交集或子集),但三个配置项分开存,互不联动。 */
+ * (cpu/memory/gpu/network 的交集或子集),但三个配置项分开存,互不联动。
+ * disk 只在状态栏出现:磁盘是慢变量,30 分钟折线图里几乎是一条水平线,没有画的价值。 */
 export type TrendChartMetric = 'cpu' | 'memory' | 'network' | 'gpu';
 
 export interface RemotePulseConfig {
+  enabled: boolean;
   refreshInterval: number;
   backgroundInterval: number;
   heavyMetricInterval: number;
@@ -21,23 +23,23 @@ export interface RemotePulseConfig {
 }
 
 const SECTION = 'remotePulse';
-const DEFAULT_STATUS_BAR_METRICS: StatusBarMetric[] = ['cpu', 'memory'];
-const DEFAULT_TREND_PANEL_SECTIONS: TrendPanelSection[] = ['gpu', 'docker'];
-const DEFAULT_TREND_CHART_METRICS: TrendChartMetric[] = ['cpu', 'memory'];
 
 export function readConfig(): RemotePulseConfig {
   const cfg = vscode.workspace.getConfiguration(SECTION);
+  // 不传第二个 fallback 参数:package.json 的 schema default 是唯一真相源,
+  // 双写两份默认值迟早会漂移;这里的 ?? 只兜住类型,不是第二份配置默认值。
   return {
-    refreshInterval: cfg.get<number>('refreshInterval', 2000),
-    backgroundInterval: cfg.get<number>('backgroundInterval', 15000),
-    heavyMetricInterval: cfg.get<number>('heavyMetricInterval', 10000),
-    warningThreshold: cfg.get<number>('warningThreshold', 80),
-    criticalThreshold: cfg.get<number>('criticalThreshold', 95),
-    statusBarMetrics: cfg.get<StatusBarMetric[]>('statusBarMetrics', DEFAULT_STATUS_BAR_METRICS),
-    trendPanelSections: cfg.get<TrendPanelSection[]>('trendPanelSections', DEFAULT_TREND_PANEL_SECTIONS),
-    trendChartMetrics: cfg.get<TrendChartMetric[]>('trendChartMetrics', DEFAULT_TREND_CHART_METRICS),
-    enableNotifications: cfg.get<boolean>('enableNotifications', false),
-    diskMountPoints: cfg.get<string[]>('diskMountPoints', []),
+    enabled: cfg.get<boolean>('enabled') ?? true,
+    refreshInterval: cfg.get<number>('refreshInterval') ?? 2000,
+    backgroundInterval: cfg.get<number>('backgroundInterval') ?? 15000,
+    heavyMetricInterval: cfg.get<number>('heavyMetricInterval') ?? 10000,
+    warningThreshold: cfg.get<number>('warningThreshold') ?? 80,
+    criticalThreshold: cfg.get<number>('criticalThreshold') ?? 95,
+    statusBarMetrics: cfg.get<StatusBarMetric[]>('statusBarMetrics') ?? [],
+    trendPanelSections: cfg.get<TrendPanelSection[]>('trendPanelSections') ?? [],
+    trendChartMetrics: cfg.get<TrendChartMetric[]>('trendChartMetrics') ?? [],
+    enableNotifications: cfg.get<boolean>('enableNotifications') ?? false,
+    diskMountPoints: cfg.get<string[]>('diskMountPoints') ?? [],
   };
 }
 
@@ -55,6 +57,7 @@ export async function configureStatusBarMetrics(): Promise<void> {
   const options: { key: StatusBarMetric; label: string }[] = [
     { key: 'cpu', label: vscode.l10n.t('CPU usage') },
     { key: 'memory', label: vscode.l10n.t('Memory usage') },
+    { key: 'disk', label: vscode.l10n.t('Disk usage (fullest mount point)') },
     { key: 'gpu', label: vscode.l10n.t('GPU utilization (primary GPU only)') },
     { key: 'network', label: vscode.l10n.t('Network transfer rate') },
   ];
@@ -100,4 +103,16 @@ async function runMultiSelect<K extends string>(
   const pickedKeys = new Set(picks.map(p => p.key));
   const next = options.filter(o => pickedKeys.has(o.key)).map(o => o.key);
   await cfg.update(settingKey, next, vscode.ConfigurationTarget.Global);
+}
+
+/** 总开关:某些机器上不想被任何额外轮询打扰时,不用卸载/禁用整个扩展,一条命令即可暂停/恢复。 */
+export async function toggleEnabled(): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration(SECTION);
+  const current = cfg.get<boolean>('enabled', true);
+  await cfg.update('enabled', !current, vscode.ConfigurationTarget.Global);
+  const nextEnabled = !current;
+  void vscode.window.setStatusBarMessage(
+    nextEnabled ? vscode.l10n.t('Remote Pulse resumed') : vscode.l10n.t('Remote Pulse paused'),
+    3000,
+  );
 }

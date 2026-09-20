@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs';
 import { CpuCollector } from './collectors/cpu';
 import { MemoryCollector } from './collectors/memory';
 import { DiskCollector } from './collectors/disk';
@@ -16,12 +18,16 @@ import {
   configureStatusBarMetrics,
   configureTrendPanelSections,
   configureTrendChartMetrics,
+  toggleEnabled,
 } from './config';
-import { CollectionState, Snapshot } from './types';
+import { CollectionState, CollectorAvailability, Snapshot } from './types';
 import { HostInfo, TrendPanel, TrendPayload } from './webview/trendPanel';
 import { formatHostLabel } from './util/hostLabel';
+import { logErrorOnce, logInfo, showLog, disposeLogChannel } from './logger';
 
 const TREND_WINDOW_MS = 30 * 60 * 1000;
+/** 严重阈值通知的"再通知间隔"默认值;期间内同一持续过载不再刷屏。 */
+const NOTIFICATION_COOLDOWN_MS = 10 * 60 * 1000;
 
 /** 本地(非远程)窗口里没有"远程主机"可言,不应该出现状态栏/占用轮询资源。 */
 export function activate(context: vscode.ExtensionContext): { monitoring: boolean } {
@@ -29,8 +35,13 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     return { monitoring: false };
   }
 
-  const statusBar = new PulseStatusBar();
   const store = new StatsStore();
+  const hostLabel = resolveHostLabel();
+  const host: HostInfo = { label: hostLabel, user: safeUserName(), addresses: listIPv4Addresses() };
+  const statusBar = new PulseStatusBar({
+    hostLabel,
+    history: (windowMs, pick) => store.recentValues(windowMs, pick),
+  });
 
   const cpuCollector = new CpuCollector();
   const memoryCollector = new MemoryCollector();
@@ -40,11 +51,14 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
   const gpuCollector = new GpuCollector();
   const dockerCollector = new DockerCollector();
 
-  const hostLabel = resolveHostLabel();
-  const host: HostInfo = { label: hostLabel, user: safeUserName(), addresses: listIPv4Addresses() };
-
   let state: CollectionState = 'loading';
   let lastWasCritical = false;
+  let mutedUntil = 0;
+  // GPU/Docker 的可用性只重(要起子进程/socket),每轮重采集会拖慢,5 分钟刷新一次就够;
+  // 面板空态提示靠它区分"没有这块硬件"和"有,但还没采到"。
+  let availability: { gpu?: CollectorAvailability; docker?: CollectorAvailability } = {};
+  let availabilityCheckedAt = 0;
+  const AVAILABILITY_REFRESH_MS = 5 * 60 * 1000;
 
   const light: Pick<Snapshot, 'cpu' | 'memory' | 'disks' | 'network'> = {};
   const heavy: Pick<Snapshot, 'gpus' | 'docker'> = {};
@@ -65,7 +79,7 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     statusBar.update(snapshot, config, state);
     maybeNotifyCritical(snapshot);
     if (TrendPanel.isOpen()) {
-      TrendPanel.refreshIfOpen(host, buildTrendPayload(store, config));
+      TrendPanel.refreshIfOpen(host, buildTrendPayload(store, config, availability));
     }
   }
 
@@ -73,27 +87,50 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     if (!config.enableNotifications) {
       return;
     }
+    const criticalParts: string[] = [];
     const cpuPercent = snapshot.cpu?.percent;
     const memPercent = snapshot.memory?.percent;
-    const criticalParts: string[] = [];
+    const fullestDisk = snapshot.disks && snapshot.disks.length > 0
+      ? snapshot.disks.reduce((a, b) => (b.percent > a.percent ? b : a))
+      : undefined;
     if (cpuPercent !== undefined && cpuPercent >= config.criticalThreshold) {
       criticalParts.push(`CPU ${Math.round(cpuPercent)}%`);
     }
     if (memPercent !== undefined && memPercent >= config.criticalThreshold) {
       criticalParts.push(`${vscode.l10n.t('Memory')} ${Math.round(memPercent)}%`);
     }
+    if (fullestDisk && fullestDisk.percent >= config.criticalThreshold) {
+      criticalParts.push(`${vscode.l10n.t('Disk')} ${fullestDisk.mountPoint} ${Math.round(fullestDisk.percent)}%`);
+    }
     const isCritical = criticalParts.length > 0;
     // 只在"跨越"到严重态的那一刻通知一次,而不是每轮轮询都弹窗,避免持续过载时通知刷屏。
     // 恢复到阈值以下后重新越界会再次触发,保证用户始终能看到最新一次告警。
-    if (isCritical && !lastWasCritical) {
-      void vscode.window.showWarningMessage(
-        `Remote Pulse: ${vscode.l10n.t('{0} on {1} has reached the critical threshold', criticalParts.join(', '), hostLabel)}`,
-      );
+    // 用户点"10 分钟内不再提示"后,mutedUntil 期间即使再次跨越也不再弹。
+    if (isCritical && !lastWasCritical && Date.now() >= mutedUntil) {
+      const SHOW_TREND = vscode.l10n.t('Show Trend');
+      const MUTE = vscode.l10n.t('Mute for 10 minutes');
+      void vscode.window
+        .showWarningMessage(
+          `Remote Pulse: ${vscode.l10n.t('{0} on {1} has reached the critical threshold', criticalParts.join(', '), hostLabel)}`,
+          SHOW_TREND,
+          MUTE,
+        )
+        .then(picked => {
+          if (picked === SHOW_TREND) {
+            void vscode.commands.executeCommand('remotePulse.showTrend');
+          } else if (picked === MUTE) {
+            mutedUntil = Date.now() + NOTIFICATION_COOLDOWN_MS;
+          }
+        });
     }
     lastWasCritical = isCritical;
   }
 
   async function collectLight(): Promise<void> {
+    if (!config.enabled) {
+      statusBar.showPaused();
+      return;
+    }
     try {
       const [cpu, memory, disks] = await Promise.all([
         cpuCollector.collect(),
@@ -111,24 +148,52 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
         config.statusBarMetrics.includes('network') ||
         config.trendChartMetrics.includes('network');
       light.network = needsNetwork ? await networkCollector.collect() : undefined;
-      if (cpu) {
+      if (cpu || memory) {
         state = 'ok';
       }
       renderAndStore();
     } catch (err) {
       state = 'error';
+      logErrorOnce('light collection', err);
       statusBar.showError(err instanceof Error ? err.message : String(err));
     }
   }
 
   async function collectHeavy(): Promise<void> {
+    if (!config.enabled) {
+      return;
+    }
     // 同理,GPU 数据可能喂状态栏摘要、趋势面板的逐卡详情、趋势图的线,三处独立勾选,任一处需要就采集。
     const needsGpu =
       config.trendPanelSections.includes('gpu') ||
       config.statusBarMetrics.includes('gpu') ||
       config.trendChartMetrics.includes('gpu');
-    heavy.gpus = needsGpu ? await gpuCollector.collect() : undefined;
-    heavy.docker = config.trendPanelSections.includes('docker') ? await dockerCollector.collect() : undefined;
+    const needsDocker = config.trendPanelSections.includes('docker');
+    try {
+      if (Date.now() - availabilityCheckedAt >= AVAILABILITY_REFRESH_MS) {
+        availabilityCheckedAt = Date.now();
+        const [gpuState, dockerState] = await Promise.all([
+          needsGpu ? gpuCollector.availabilityStatus() : Promise.resolve<CollectorAvailability>('available'),
+          needsDocker ? dockerCollector.availabilityStatus() : Promise.resolve<CollectorAvailability>('available'),
+        ]);
+        availability = { gpu: needsGpu ? gpuState : undefined, docker: needsDocker ? dockerState : undefined };
+        if (gpuState !== 'available' || dockerState !== 'available') {
+          logInfo(`availability: gpu=${needsGpu ? gpuState : 'not-needed'} docker=${needsDocker ? dockerState : 'not-needed'}`);
+        }
+      }
+      heavy.gpus = needsGpu ? await gpuCollector.collect() : undefined;
+      heavy.docker = needsDocker ? await dockerCollector.collect() : undefined;
+      // 采集器自己只返回 undefined(保持不依赖 vscode 以便纯 node 单测),诊断原因在这里落日志。
+      if (gpuCollector.lastError) {
+        logErrorOnce('gpu collection', gpuCollector.lastError);
+      }
+      if (dockerCollector.lastError) {
+        logErrorOnce('docker collection', dockerCollector.lastError);
+      }
+    } catch (err) {
+      // 重通道失败不影响轻通道的展示,只记日志——collectLight 的下一轮渲染会把最新数据带出去。
+      logErrorOnce('heavy collection', err);
+    }
   }
 
   const lightPoller = new Poller(collectLight, config.refreshInterval);
@@ -147,12 +212,23 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     if (!isRemotePulseConfigChange(e)) {
       return;
     }
+    const wasEnabled = config.enabled;
     config = readConfig();
     applyIntervalsForFocus(vscode.window.state.focused);
+    if (!wasEnabled && config.enabled) {
+      // 从暂停恢复:历史里还留着暂停前的旧点,先清掉,不然趋势图会横跨整段暂停期。
+      store.clear();
+      state = 'loading';
+      logInfo('resumed');
+      void Promise.all([lightPoller.runNow(), heavyPoller.runNow()]);
+    } else if (wasEnabled && !config.enabled) {
+      logInfo('paused');
+      statusBar.showPaused();
+    }
   });
 
   const showTrendCommand = vscode.commands.registerCommand('remotePulse.showTrend', () => {
-    TrendPanel.createOrShow(host, buildTrendPayload(store, config));
+    TrendPanel.createOrShow(host, buildTrendPayload(store, config, availability));
   });
 
   const refreshCommand = vscode.commands.registerCommand('remotePulse.refresh', async () => {
@@ -172,6 +248,37 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     configureTrendChartMetrics,
   );
 
+  const toggleEnabledCommand = vscode.commands.registerCommand('remotePulse.toggleEnabled', toggleEnabled);
+
+  const showLogCommand = vscode.commands.registerCommand('remotePulse.showLog', showLog);
+
+  /** 把内存里的历史快照写进系统临时目录:远程主机上没有 GUI 文件对话框,不落 workspace。 */
+  const exportSnapshotCommand = vscode.commands.registerCommand('remotePulse.exportSnapshot', async () => {
+    const fileName = `remote-pulse-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const filePath = path.join(os.tmpdir(), fileName);
+    const payload = {
+      host,
+      exportedAt: new Date().toISOString(),
+      config,
+      snapshots: store.getHistory(),
+    };
+    try {
+      await fs.promises.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
+    } catch (err) {
+      logErrorOnce('exportSnapshot', err);
+      void vscode.window.showErrorMessage(`Remote Pulse: ${vscode.l10n.t('Failed to export snapshot: {0}', err instanceof Error ? err.message : String(err))}`);
+      return;
+    }
+    const OPEN = vscode.l10n.t('Open File');
+    const picked = await vscode.window.showInformationMessage(
+      vscode.l10n.t('Snapshot exported to {0}', filePath),
+      OPEN,
+    );
+    if (picked === OPEN) {
+      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+    }
+  });
+
   context.subscriptions.push(
     statusBar,
     focusListener,
@@ -181,8 +288,12 @@ export function activate(context: vscode.ExtensionContext): { monitoring: boolea
     configureStatusBarMetricsCommand,
     configureTrendPanelSectionsCommand,
     configureTrendChartMetricsCommand,
+    toggleEnabledCommand,
+    showLogCommand,
+    exportSnapshotCommand,
     lightPoller,
     heavyPoller,
+    { dispose: disposeLogChannel },
   );
 
   return { monitoring: true };
@@ -247,7 +358,11 @@ function findNonInternalIPv4(): string | undefined {
   return listIPv4Addresses()[0]?.address;
 }
 
-function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendPayload {
+function buildTrendPayload(
+  store: StatsStore,
+  config: RemotePulseConfig,
+  availability: { gpu?: CollectorAvailability; docker?: CollectorAvailability },
+): TrendPayload {
   const history = store.getHistory();
   const cutoff = Date.now() - TREND_WINDOW_MS;
   const windowed = history.filter(s => s.timestamp >= cutoff);
@@ -290,5 +405,11 @@ function buildTrendPayload(store: StatsStore, config: RemotePulseConfig): TrendP
       uptimeSeconds: latestSnapshot.uptimeSeconds,
     },
     thresholds: { warning: config.warningThreshold, critical: config.criticalThreshold },
+    // 探测说"可用"但还没有一轮成功采集(重通道 10 秒一次)的窗口期,提示语应是
+    // "等待首次采集"而不是"没有这块硬件"。
+    availability: {
+      gpu: availability.gpu === 'available' && !latestSnapshot?.gpus ? 'pending' : availability.gpu,
+      docker: availability.docker === 'available' && !latestSnapshot?.docker ? 'pending' : availability.docker,
+    },
   };
 }

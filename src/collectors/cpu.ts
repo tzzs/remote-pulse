@@ -38,14 +38,8 @@ export function calcCpuUsage(prev: CpuTimes, curr: CpuTimes): number {
   return Math.min(100, Math.max(0, usage));
 }
 
-async function readLinuxCpuTimes(): Promise<CpuTimes> {
-  const raw = await fs.promises.readFile(PROC_STAT, 'utf8');
-  return parseCpuTimes(raw);
-}
-
-async function readLinuxCoreCount(): Promise<number> {
-  const raw = await fs.promises.readFile(PROC_STAT, 'utf8');
-  return parseCpuCoreCount(raw);
+async function readLinuxProcStat(): Promise<string> {
+  return fs.promises.readFile(PROC_STAT, 'utf8');
 }
 
 /** 非 Linux(如 SSH 到 macOS 主机)的兜底实现:用 os.cpus() 的累计时间做同样的增量计算。 */
@@ -67,14 +61,16 @@ export class CpuCollector {
   async collect(): Promise<CpuStats | undefined> {
     const useLinux = await isPathReadable(PROC_STAT);
     if (useLinux) {
-      const curr = await readLinuxCpuTimes();
+      // 一次 read 同时解析时间片和核数:两次独立 read 之间时间已经前进,
+      // 增量必须来自同一份快照,否则算出来的使用率对不上同一时间窗。
+      const raw = await readLinuxProcStat();
+      const curr = parseCpuTimes(raw);
       const prev = this.prevLinux;
       this.prevLinux = curr;
       if (!prev) {
         return undefined;
       }
-      const cores = await readLinuxCoreCount();
-      return { percent: calcCpuUsage(prev, curr), cores };
+      return { percent: calcCpuUsage(prev, curr), cores: parseCpuCoreCount(raw) };
     }
 
     const curr = fallbackCpuTimes();

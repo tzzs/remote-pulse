@@ -1,100 +1,12 @@
 import * as vscode from 'vscode';
-import { AlertLevel, CpuStats, DiskStats, DockerStats, GpuStats, MemoryStats, NetworkRate } from '../types';
-import { calcAlertLevel } from '../store/statsStore';
-import { formatBytes, formatRate, formatUptime } from '../util/sparkline';
+import * as crypto from 'crypto';
 import { configureStatusBarMetrics, configureTrendPanelSections, configureTrendChartMetrics } from '../config';
+import { buildModel, HostInfo, PanelModel, TrendPayload } from './panelModel';
+
+export { HostInfo, TrendPayload, TrendSeries, TrendLatest } from './panelModel';
 
 function nonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let text = '';
-  for (let i = 0; i < 32; i += 1) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
-}
-
-export interface TrendSeries {
-  /** 与其余数组一一对应的 epoch ms,悬浮提示要靠它算出该点的具体时间。 */
-  timestamps: number[];
-  /** 每条线是否出现由 remotePulse.trendChartMetrics 独立控制,和"System"信息行/GPU 详情区块是否显示是两码事——
-   * 所以这里全部是可选数组,undefined 就是"这条线没被勾选,不画"。 */
-  cpu?: number[];
-  memory?: number[];
-  /**
-   * 上传/下载分开两条线,而不是 rx+tx 加在一起——合并成一个数就分不清是在上传还是下载了
-   * (状态栏的网络项也是同样的理由拆开的)。单位 B/s,原始值不做归一化,画图时两条线共用
-   * 独立的右侧 y 轴(自己的量纲),而不是硬挤进 CPU/内存共用的百分比左轴。
-   */
-  networkRx?: number[];
-  networkTx?: number[];
-  /** 只取第一张 GPU(和状态栏摘要同一个"主卡"约定),多卡详情仍然只在 GPU 详情区块里能看到。 */
-  gpu?: number[];
-}
-
-export interface TrendLatest {
-  cpu?: CpuStats;
-  memory?: MemoryStats;
-  disks: DiskStats[];
-  network?: NetworkRate;
-  gpus: GpuStats[];
-  docker?: DockerStats;
-  uptimeSeconds?: number;
-}
-
-export interface TrendPayload {
-  series: TrendSeries;
-  latest?: TrendLatest;
-  thresholds: { warning: number; critical: number };
-}
-
-/** 远程主机的身份信息。user / addresses 在受限环境下可能取不到,所以都是可选的。 */
-export interface HostInfo {
-  label: string;
-  user?: string;
-  /** 全部非内网 IPv4,按网卡列出——多网卡机器(WSL 的 eth0 + docker0)只看一个地址是不够的。 */
-  addresses?: { iface: string; address: string }[];
-}
-
-/**
- * 面板渲染模型:取值、单位换算、本地化全部在扩展侧完成,webview 只按模型建 DOM。
- * 这样 webview 里不出现任何字符串拼接的 HTML,主机名/挂载点/GPU 型号/容器名即使
- * 含尖括号也只会作为 textContent 出现,天然没有注入面。
- */
-interface MetricRow {
-  label: string;
-  detail: string;
-  value: string;
-  /** 有百分比才画进度条;温度、速率这类没有 0-100 语义的指标不画。 */
-  percent?: number;
-  level: AlertLevel;
-  /** 子行(GPU 各项指标):缩进 16px 并收窄标签列,让进度条与数值仍落在同一条右边线上。 */
-  sub?: boolean;
-  strong?: boolean;
-}
-
-interface ChartLegendItem {
-  /** 客户端靠这个 key(而不是数组下标)去 SERIES_DEFS 里找颜色/className——
-   * 一旦某条线可以被单独勾掉,"第 i 个图例对应第 i 个预定义线"这个位置假设就不成立了。 */
-  key: 'cpu' | 'memory' | 'gpu' | 'networkRx' | 'networkTx';
-  name: string;
-  /** 最新一次采集的即时值,和图表末端的圆点是同一个数,不随悬浮变化。 */
-  value?: string;
-}
-
-type PanelGroup =
-  | { kind: 'metrics'; title: string; badge?: string; rows: MetricRow[] }
-  | { kind: 'chart'; title: string; legend: ChartLegendItem[]; emptyHint: string }
-  | { kind: 'table'; title: string; badge?: string; columns: [string, string]; rows: [string, string, string][]; emptyHint?: string };
-
-interface PanelModel {
-  host: { name: string; meta: string; user?: string };
-  updated: string;
-  /** 按钮的 title/aria-label,完整描述用——"Remote Pulse Settings"。 */
-  settingsLabel: string;
-  /** 齿轮图标旁边显示的短文字,和 settingsLabel 分开是因为标题栏寸土寸金,"Settings"一个词就够了。 */
-  settingsText: string;
-  groups: PanelGroup[];
-  series: { timestamps: number[]; cpu?: number[]; memory?: number[]; gpu?: number[]; networkRx?: number[]; networkTx?: number[] };
+  return crypto.randomBytes(16).toString('base64');
 }
 
 /**
@@ -165,7 +77,7 @@ export class TrendPanel {
     this.panel.title = `Remote Pulse — ${host.label}`;
     this.panel.webview.html = this.renderShell();
     this.panel.webview.onDidReceiveMessage(
-      message => {
+      (message: { type?: unknown }) => {
         if (message?.type === 'ready' && this.lastModel) {
           void this.panel.webview.postMessage({ type: 'model', model: this.lastModel });
         } else if (message?.type === 'openSettings') {
@@ -181,7 +93,10 @@ export class TrendPanel {
 
   private update(host: HostInfo, payload: TrendPayload): void {
     this.panel.title = `Remote Pulse — ${host.label}`;
-    this.lastModel = buildModel(host, payload);
+    this.lastModel = buildModel(host, payload, {
+      locale: vscode.env.language,
+      t: (message, ...args) => vscode.l10n.t(message, ...args),
+    });
     void this.panel.webview.postMessage({ type: 'model', model: this.lastModel });
   }
 
@@ -211,172 +126,6 @@ export class TrendPanel {
       this.disposables.pop()?.dispose();
     }
   }
-}
-
-/** "host [WSL:distro] (10.0.0.2)" → 主名 + 弱化的 IP,IP 缺失时整串当主名。 */
-function splitHostLabel(hostLabel: string): { name: string; meta: string } {
-  const match = /^(.*?)\s*\(([^()]*)\)$/.exec(hostLabel);
-  return match ? { name: match[1], meta: match[2] } : { name: hostLabel, meta: '' };
-}
-
-function buildModel(host: HostInfo, payload: TrendPayload): PanelModel {
-  const { series, latest, thresholds } = payload;
-  const levelOf = (percent: number): AlertLevel => calcAlertLevel(percent, thresholds.warning, thresholds.critical);
-  const groups: PanelGroup[] = [];
-
-  const system: MetricRow[] = [];
-  if (latest?.cpu) {
-    system.push({
-      label: 'CPU',
-      detail: vscode.l10n.t('{0} cores', latest.cpu.cores),
-      value: `${Math.round(latest.cpu.percent)}%`,
-      percent: latest.cpu.percent,
-      level: levelOf(latest.cpu.percent),
-    });
-  }
-  if (latest?.memory) {
-    system.push({
-      label: vscode.l10n.t('Memory'),
-      detail: `${formatBytes(latest.memory.used)} / ${formatBytes(latest.memory.total)}`,
-      value: `${Math.round(latest.memory.percent)}%`,
-      percent: latest.memory.percent,
-      level: levelOf(latest.memory.percent),
-    });
-  }
-  if (latest?.network) {
-    system.push({
-      label: vscode.l10n.t('Network'),
-      detail: '',
-      // HTML 会把连续空格折叠成一个,用 em space 才能保住上下行速率之间的视觉间隔。
-      value: `↓ ${formatRate(latest.network.rxRate)}  ↑ ${formatRate(latest.network.txRate)}`,
-      level: 'normal',
-    });
-  }
-  if (latest?.uptimeSeconds !== undefined) {
-    system.push({ label: vscode.l10n.t('Uptime'), detail: '', value: formatUptime(latest.uptimeSeconds), level: 'normal' });
-  }
-  // 每张网卡一行:标签是网卡名(eth0/wlan0/docker0 这类),多网卡时靠它互相区分,单看这几个字符
-  // 猜不出是什么意思——detail 列补一句"网络接口",眼睛扫到这行不用先认得 Linux 网卡命名习惯。
-  for (const { iface, address } of host.addresses ?? []) {
-    system.push({ label: iface, detail: vscode.l10n.t('Network interface'), value: address, level: 'normal' });
-  }
-  if (system.length) {
-    groups.push({ kind: 'metrics', title: vscode.l10n.t('System'), rows: system });
-  }
-
-  // 图例的"当前值"直接取 series 数组的最后一个点,而不是另外查 latest.* ——这样图例
-  // 完全由 trendChartMetrics 驱动,不会因为"System"信息行/GPU 详情区块各自的显示开关
-  // (trendPanelSections)而跟着变化,两套配置才能真正互不影响地独立生效。
-  const lastOf = (values?: number[]): number | undefined => (values && values.length ? values[values.length - 1] : undefined);
-  // 图例顺序就是图表画线的顺序(cpu, memory, gpu, 再 network)——PANEL_SCRIPT 按 legend 里的
-  // key(而不是数组下标)去匹配预定义的颜色/className,顺序只影响图例文字的先后和线的叠放层次。
-  const legend: ChartLegendItem[] = [];
-  if (series.cpu) {
-    const value = lastOf(series.cpu);
-    legend.push({ key: 'cpu', name: 'CPU', value: value !== undefined ? `${Math.round(value)}%` : undefined });
-  }
-  if (series.memory) {
-    const value = lastOf(series.memory);
-    legend.push({ key: 'memory', name: vscode.l10n.t('Memory'), value: value !== undefined ? `${Math.round(value)}%` : undefined });
-  }
-  if (series.gpu) {
-    const value = lastOf(series.gpu);
-    legend.push({ key: 'gpu', name: 'GPU', value: value !== undefined ? `${Math.round(value)}%` : undefined });
-  }
-  // 上传/下载各画一条线、各一条图例——合并成一个数就分不清是在上传还是下载,和状态栏网络项
-  // 拆成 $(arrow-down)/$(arrow-up) 两截是同一个理由。两条线共享同一段右轴,domain 由
-  // PANEL_SCRIPT 里 niceMax(Math.max(rx 峰值, tx 峰值)) 统一算,不能各自独立取峰值。
-  if (series.networkRx) {
-    const value = lastOf(series.networkRx);
-    legend.push({ key: 'networkRx', name: `↓ ${vscode.l10n.t('Download')}`, value: value !== undefined ? formatRate(value) : undefined });
-  }
-  if (series.networkTx) {
-    const value = lastOf(series.networkTx);
-    legend.push({ key: 'networkTx', name: `↑ ${vscode.l10n.t('Upload')}`, value: value !== undefined ? formatRate(value) : undefined });
-  }
-  groups.push({
-    kind: 'chart',
-    title: vscode.l10n.t('past 30 minutes'),
-    legend,
-    emptyHint: vscode.l10n.t('Not enough history data yet. Please wait a few seconds and reopen.'),
-  });
-
-  const disks = latest?.disks ?? [];
-  if (disks.length) {
-    groups.push({
-      kind: 'metrics',
-      title: vscode.l10n.t('Storage'),
-      rows: disks.map(disk => ({
-        label: disk.mountPoint,
-        detail: `${formatBytes(disk.used)} / ${formatBytes(disk.total)}`,
-        value: `${Math.round(disk.percent)}%`,
-        percent: disk.percent,
-        level: levelOf(disk.percent),
-      })),
-    });
-  }
-
-  const gpus = latest?.gpus ?? [];
-  if (gpus.length) {
-    const rows: MetricRow[] = [];
-    for (const gpu of gpus) {
-      const vramPercent = gpu.memoryTotalMb > 0 ? (gpu.memoryUsedMb / gpu.memoryTotalMb) * 100 : 0;
-      rows.push({ label: `GPU ${gpu.index}`, detail: gpu.name ?? '', value: '', level: 'normal', strong: true });
-      rows.push({
-        label: vscode.l10n.t('Utilization'),
-        detail: '',
-        value: `${Math.round(gpu.utilizationPercent)}%`,
-        percent: gpu.utilizationPercent,
-        level: levelOf(gpu.utilizationPercent),
-        sub: true,
-      });
-      rows.push({
-        label: vscode.l10n.t('VRAM'),
-        detail: `${formatBytes(gpu.memoryUsedMb * 1024 * 1024)} / ${formatBytes(gpu.memoryTotalMb * 1024 * 1024)}`,
-        value: `${Math.round(vramPercent)}%`,
-        percent: vramPercent,
-        level: levelOf(vramPercent),
-        sub: true,
-      });
-      rows.push({
-        label: vscode.l10n.t('Temp'),
-        detail: '',
-        value: `${gpu.temperatureC} °C`,
-        level: levelOf(gpu.temperatureC),
-        sub: true,
-      });
-    }
-    groups.push({ kind: 'metrics', title: 'GPU', rows });
-  }
-
-  if (latest?.docker) {
-    groups.push({
-      kind: 'table',
-      title: 'Docker',
-      badge: String(latest.docker.containerCount),
-      columns: ['CPU', vscode.l10n.t('Memory')],
-      rows: latest.docker.containers.map(c => [c.name, `${c.cpuPercent.toFixed(1)}%`, formatBytes(c.memoryUsedBytes)] as [string, string, string]),
-      emptyHint: vscode.l10n.t('No containers running'),
-    });
-  }
-
-  const updatedAt = new Intl.DateTimeFormat(vscode.env.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date());
-
-  return {
-    host: { ...splitHostLabel(host.label), user: host.user },
-    updated: vscode.l10n.t('Updated {0}', updatedAt),
-    settingsLabel: vscode.l10n.t('Remote Pulse Settings'),
-    settingsText: vscode.l10n.t('Settings'),
-    groups,
-    series: {
-      timestamps: series.timestamps,
-      cpu: series.cpu,
-      memory: series.memory,
-      gpu: series.gpu,
-      networkRx: series.networkRx,
-      networkTx: series.networkTx,
-    },
-  };
 }
 
 /**
@@ -461,15 +210,26 @@ const PANEL_CSS = `
   .warning .row-value { color: var(--rp-warning); }
   .critical .row-value { color: var(--rp-critical); }
 
-  .trow { display: grid; grid-template-columns: minmax(0, 1fr) 96px 96px; align-items: center; gap: 12px; height: 22px; }
-  .trow.head { font-size: 11px; line-height: 16px; letter-spacing: 0.04em; text-transform: uppercase;
-               color: var(--rp-muted); height: 20px; }
-  .trow span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .trow span:first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dtable { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .dtable th { font-size: 11px; line-height: 16px; letter-spacing: 0.04em; text-transform: uppercase;
+               color: var(--rp-muted); font-weight: 400; text-align: right; padding: 2px 0; height: 20px; }
+  .dtable th:first-child { text-align: left; }
+  .dtable td { height: 22px; font-size: 13px; text-align: right; white-space: nowrap;
+               font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+  .dtable td:first-child { text-align: left; width: 40%; }
+  .dtable td:nth-child(2) { width: 22%; }
+  .dtable td.warning, .dtable th.warning { color: var(--rp-warning); }
+  .dtable td.critical, .dtable th.critical { color: var(--rp-critical); }
 
-  .legend { display: flex; align-items: center; gap: 14px; margin-left: auto;
+  .legend { display: flex; align-items: center; gap: 10px; margin-left: auto;
             font-size: 11px; line-height: 16px; color: var(--rp-muted); }
-  .legend-item { display: flex; align-items: center; gap: 5px; }
+  /* 图例项是按钮:点一下临时隐藏对应的那条线(刷新模型前有效),不用绕道设置面板。 */
+  .legend-item { display: flex; align-items: center; gap: 5px; padding: 1px 4px; border: none; border-radius: 3px;
+                 background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .legend-item:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25)); }
+  .legend-item:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+  .legend-item.off { opacity: 0.4; }
+  .legend-item.off .legend-value { text-decoration: line-through; }
   .legend-value { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; }
   .swatch { width: 8px; height: 2px; border-radius: 1px; flex-shrink: 0; }
   /* 悬浮提示是绝对定位在图表上的浮层,包裹容器要立坐标系。 */
@@ -477,6 +237,7 @@ const PANEL_CSS = `
   .chart { display: block; width: 100%; cursor: crosshair; }
   .chart .grid { stroke: var(--rp-hairline); stroke-width: 1; }
   .chart .axis { fill: var(--rp-muted); font-size: 11px; }
+  .chart .time-label { fill: var(--rp-muted); font-size: 10px; }
   .chart .cpu { fill: none; stroke: var(--rp-cpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .mem { fill: none; stroke: var(--rp-mem); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .chart .gpu { fill: none; stroke: var(--rp-gpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
@@ -485,6 +246,7 @@ const PANEL_CSS = `
   .chart .guide { stroke: var(--rp-muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; pointer-events: none; }
   .chart .hover-dot { opacity: 0; pointer-events: none; }
   .hint { font-size: 11px; line-height: 16px; color: var(--rp-muted); margin: 6px 0 0; }
+  .row.hint-row .row-label { font-size: 11px; color: var(--rp-muted); white-space: normal; }
 
   /* VS Code 的 hover widget token——用同一套语义色,浮层才像"原生弹出",不是自造的卡片。 */
   .chart-tooltip {
@@ -511,12 +273,13 @@ const PANEL_CSS = `
     }
     /* 无进度条的行(网络速率、运行时长、温度)数值本身就长,不能挤进 44px 的数值列。 */
     .row.wide, .row.sub.wide { grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; }
+    .row.hint-row { grid-template-columns: 1fr; }
     .row.sub { padding-left: 12px; }
     .row-label { grid-area: label; }
     .row-detail { grid-area: detail; text-align: right; }
     .row-value { grid-area: value; }
     .track { grid-area: bar; margin-top: 2px; }
-    .trow { grid-template-columns: minmax(0, 1fr) 60px 72px; gap: 8px; }
+    .dtable td:first-child { width: 34%; }
     /* 图例现在带着"CPU 61%"这样的数值,窄栏里和标题挤不下,允许换到第二行。 */
     .section-head { flex-wrap: wrap; row-gap: 4px; }
     .legend { margin-left: 0; }
@@ -543,6 +306,9 @@ const PANEL_SCRIPT = `
     { key: 'networkTx', colorVar: 'var(--rp-net-tx)', className: 'net-tx' },
   ];
   let chartActiveDefs = SERIES_DEFS.slice(0, 2);
+  /** 点图例临时隐藏的线的 key 集合——纯客户端视图状态,不写回配置;配置变化重建图例时清空,
+      免得用户刚勾回来的线还被上一次的临时隐藏压着。 */
+  let hiddenKeys = {};
   /** 悬浮态跨轮询保留:每 2 秒的重绘会重建折线和圆点,如果不在重绘后把悬浮指示器按住原位置
       重新画一次,鼠标不动也会看到它每 2 秒闪一下。 */
   let chartGuide = null;
@@ -585,12 +351,20 @@ const PANEL_SCRIPT = `
     return value.toFixed(i === 0 ? 0 : 1) + ' ' + units[i] + '/s';
   }
 
-  /** 把窗口内的原始峰值撑到一个好看的刻度上限——按 1024 进制取整,这样轴标签显示出来才是
-      整数的 KB/MB(比如 "2.0 MB/s"),跟 formatRateJs 的二进制单位对得上,不会出现 "1.9 MB/s"
-      这种十进制取整后被二进制单位换算弄得不整的数。阶梯只到 10 会漏掉 10~1024 这一整段——
-      比如峰值 878KB/s,除一次 1024 后 v=878,不满足 <=10 里任何一档,原逻辑会直接落到"10",
-      算出来的上限(10KB)反而比峰值本身还小,把线整条顶穿画到轴外面,看着像那条线消失了。
-      阶梯延伸到 1024 才能覆盖任意峰值。 */
+  /** x 轴时间刻度:跨度 30 分钟用 HH:MM 就够,更短的窗口才需要秒。 */
+  function formatTimeMs(ms) {
+    var d = new Date(ms);
+    if (isNaN(d.getTime())) return '';
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  /**
+   * 把窗口内的原始峰值撑到一个好看的刻度上限——按 1024 进制取整,这样轴标签显示出来才是
+   * 整数的 KB/MB(比如 "2.0 MB/s"),跟 formatRateJs 的二进制单位对得上,不会出现 "1.9 MB/s"
+   * 这种十进制取整后被二进制单位换算弄得不整的数。阶梯只到 10 会漏掉 10~1024 这一整段——
+   * 比如峰值 878KB/s,除一次 1024 后 v=878,不满足 <=10 里任何一档,原逻辑会直接落到"10",
+   * 算出来的上限(10KB)反而比峰值本身还小,把线整条顶穿画到轴外面,看着像那条线消失了。
+   * 阶梯延伸到 1024 才能覆盖任意峰值。 */
   function niceMax(raw) {
     if (!isFinite(raw) || raw <= 0) return 1;
     var i = 0;
@@ -623,8 +397,8 @@ const PANEL_SCRIPT = `
   /** 结构不变就只改文字和条宽,避免每 2 秒重建 DOM 打断用户的文字选中。 */
   function shapeOf(m) {
     return JSON.stringify(m.groups.map(function (g) {
-      if (g.kind === 'metrics') return ['m', g.title, g.rows.map(function (r) { return [r.label, !!r.sub, !!r.strong, r.percent !== undefined]; })];
-      if (g.kind === 'table') return ['t', g.title, g.rows.map(function (r) { return r[0]; })];
+      if (g.kind === 'metrics') return ['m', g.title, g.rows.map(function (r) { return [r.label, !!r.sub, !!r.strong, !!r.hint, r.percent !== undefined]; })];
+      if (g.kind === 'table') return ['t', g.title, g.rows.length];
       // 比较的是 legend 的 key 序列而不是长度——中途切换哪几条线(哪怕数量不变,比如把 cpu
       // 换成 gpu)也必须触发整块重建,否则 chartActiveDefs 和图例项对不上,apply() 会拿旧
       // slot 去读新模型,读错位置或者干脆把 GPU 数据画成 CPU 的颜色。
@@ -641,6 +415,7 @@ const PANEL_SCRIPT = `
     chartDots = [];
     chartData = null;
     hovering = false;
+    hiddenKeys = {};
     const frag = document.createDocumentFragment();
 
     const host = el('div', 'host');
@@ -695,7 +470,8 @@ const PANEL_SCRIPT = `
         });
         const legend = el('span', 'legend');
         for (let i = 0; i < group.legend.length; i++) {
-          const item = el('span', 'legend-item');
+          const item = el('button', 'legend-item');
+          item.type = 'button';
           const dot = el('span', 'swatch');
           dot.style.background = chartActiveDefs[i].colorVar;
           item.appendChild(dot);
@@ -703,6 +479,13 @@ const PANEL_SCRIPT = `
           // 末端圆点旁边这个数才是真正的"当前值"——每轮采集都更新,不需要悬浮就看得到。
           const valueEl = el('span', 'legend-value', group.legend[i].value || '');
           item.appendChild(valueEl);
+          // 点图例 = 临时隐藏/恢复这条线(纯客户端视图状态,不动配置)。
+          const key = group.legend[i].key;
+          item.addEventListener('click', function () {
+            hiddenKeys[key] = !hiddenKeys[key];
+            item.classList.toggle('off', !!hiddenKeys[key]);
+            drawChart(model.series);
+          });
           legend.appendChild(item);
           slots.push({ kind: 'legend-value', node: valueEl });
         }
@@ -710,7 +493,7 @@ const PANEL_SCRIPT = `
         section.appendChild(head);
 
         const chartWrap = el('div', 'chart-wrap');
-        chartEl = svg('svg', { class: 'chart', preserveAspectRatio: 'none' });
+        chartEl = svg('svg', { class: 'chart', preserveAspectRatio: 'none', role: 'img' });
         chartEl.addEventListener('pointermove', onChartPointerMove);
         chartEl.addEventListener('pointerleave', onChartPointerLeave);
         chartWrap.appendChild(chartEl);
@@ -731,6 +514,16 @@ const PANEL_SCRIPT = `
 
       if (group.kind === 'metrics') {
         for (const row of group.rows) {
+          if (row.hint) {
+            // 空态/不可用提示:整行灰色文字,没有数值和进度条。
+            const node = el('div', 'row wide hint-row');
+            const label = el('span', 'row-label');
+            setText(label, row.label);
+            node.appendChild(label);
+            rows.appendChild(node);
+            slots.push({ kind: 'hint' });
+            continue;
+          }
           const hasBar = row.percent !== undefined;
           let className = 'row';
           if (row.sub) className += ' sub';
@@ -756,26 +549,39 @@ const PANEL_SCRIPT = `
           slots.push({ kind: 'row', node: node, detail: detail, value: value, fill: fill });
         }
       } else {
-        const head2 = el('div', 'trow head');
-        head2.appendChild(el('span', '', ''));
-        head2.appendChild(el('span', '', group.columns[0]));
-        head2.appendChild(el('span', '', group.columns[1]));
-        rows.appendChild(head2);
+        // 原生 <table>:读屏器能按行列播报,列宽也自动随内容适配。
+        const table = el('table', 'dtable');
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        for (let c = 0; c < group.columns.length; c++) {
+          const th = document.createElement('th');
+          th.scope = 'col';
+          th.textContent = group.columns[c];
+          if (c === 0) th.style.textAlign = 'left';
+          headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
         if (!group.rows.length && group.emptyHint) {
           rows.appendChild(el('p', 'hint', group.emptyHint));
         }
         for (const cells of group.rows) {
-          const node = el('div', 'trow');
-          const name = el('span', '');
-          setText(name, cells[0]);
-          const cpu = el('span', '', cells[1]);
-          const mem = el('span', '', cells[2]);
-          node.appendChild(name);
-          node.appendChild(cpu);
-          node.appendChild(mem);
-          rows.appendChild(node);
-          slots.push({ kind: 'cells', cpu: cpu, mem: mem });
+          const tr = document.createElement('tr');
+          const nameTd = document.createElement('td');
+          setText(nameTd, cells[0]);
+          const cpuTd = document.createElement('td');
+          cpuTd.textContent = cells[1];
+          const memTd = document.createElement('td');
+          memTd.textContent = cells[2];
+          tr.appendChild(nameTd);
+          tr.appendChild(cpuTd);
+          tr.appendChild(memTd);
+          tbody.appendChild(tr);
+          slots.push({ kind: 'cells', cpu: cpuTd, mem: memTd });
         }
+        table.appendChild(tbody);
+        rows.appendChild(table);
       }
 
       section.appendChild(rows);
@@ -799,6 +605,7 @@ const PANEL_SCRIPT = `
       if (group.kind === 'metrics') {
         for (const row of group.rows) {
           const slot = slots[i++];
+          if (slot.kind === 'hint') continue;
           setText(slot.detail, row.detail);
           slot.value.textContent = row.value;
           slot.node.classList.toggle('warning', row.level === 'warning');
@@ -806,10 +613,14 @@ const PANEL_SCRIPT = `
           if (slot.fill) slot.fill.style.width = Math.max(0, Math.min(100, row.percent)) + '%';
         }
       } else {
-        for (const cells of group.rows) {
+        for (let r = 0; r < group.rows.length; r++) {
+          const cells = group.rows[r];
           const slot = slots[i++];
           slot.cpu.textContent = cells[1];
           slot.mem.textContent = cells[2];
+          const level = group.levels[r] || 'normal';
+          slot.mem.classList.toggle('warning', level === 'warning');
+          slot.mem.classList.toggle('critical', level === 'critical');
         }
       }
     }
@@ -865,6 +676,7 @@ const PANEL_SCRIPT = `
     }
     for (let i = 0; i < chartActiveDefs.length; i++) {
       const def = chartActiveDefs[i];
+      if (hiddenKeys[def.key]) continue;
       chartTooltip.appendChild(metricRow(def.colorVar, def.name, formatSeriesValue(def, valuesAtIndex[i])));
     }
   }
@@ -892,8 +704,9 @@ const PANEL_SCRIPT = `
     const valuesAtIndex = chartData.series.map(function (s) { return s.vals[nearest]; });
     let minY = Infinity;
     for (let i = 0; i < chartData.series.length; i++) {
-      const y = toY(valuesAtIndex[i], chartData.series[i].domain, chartData.top, chartData.plotH);
       const dot = chartDots[i];
+      if (!dot) continue;
+      const y = toY(valuesAtIndex[i], chartData.series[i].domain, chartData.top, chartData.plotH);
       dot.setAttribute('cx', x);
       dot.setAttribute('cy', y);
       dot.style.opacity = '1';
@@ -911,7 +724,7 @@ const PANEL_SCRIPT = `
     const offsetX = rect.left - wrapRect.left;
     const offsetY = rect.top - wrapRect.top;
     const pointLocalX = offsetX + x / scale;
-    const pointLocalY = offsetY + minY / scale;
+    const pointLocalY = offsetY + (isFinite(minY) ? minY : 0) / scale;
 
     chartTooltip.style.display = 'flex';
     const ttWidth = chartTooltip.offsetWidth;
@@ -946,7 +759,7 @@ const PANEL_SCRIPT = `
     return [];
   }
 
-  /** cpu/memory/gpu 都是 0-100% 的左轴;上传/下载共用右轴的同一段量纲(domain.max 由 niceMax() 决定)。 */
+  /** cpu/memory/gpu 都是 0-100% 的左轴;上传/下载共用右轴自己的量纲(domain.max 由 niceMax() 决定)。 */
   function toY(value, domain, top, plotH) {
     const v = Math.max(domain.min, Math.min(domain.max, value));
     const range = domain.max - domain.min || 1;
@@ -955,8 +768,9 @@ const PANEL_SCRIPT = `
 
   function drawChart(series) {
     if (!chartEl) return;
-    // 哪几条线在画由 chartActiveDefs(源自 trendChartMetrics)决定,不再假设 cpu/memory 一定存在。
-    const hasData = chartActiveDefs.some(function (def) { return valuesFor(def.key, series).length > 1; });
+    // 哪几条线在画由 chartActiveDefs(源自 trendChartMetrics)决定,再叠加图例点击的临时隐藏。
+    const visibleDefs = chartActiveDefs.filter(function (def) { return !hiddenKeys[def.key]; });
+    const hasData = visibleDefs.some(function (def) { return valuesFor(def.key, series).length > 1; });
     chartHint.hidden = hasData;
     chartEl.hidden = !hasData;
     if (!hasData) {
@@ -967,10 +781,11 @@ const PANEL_SCRIPT = `
 
     const narrow = window.innerWidth < 520;
     const gutter = narrow ? 42 : 44;
+    // 底部多留 12px 给 x 轴时间刻度。
     const plotH = narrow ? 112 : 132;
     const top = 8;
     const width = Math.max(160, Math.round(chartEl.getBoundingClientRect().width));
-    const height = top + plotH + 10;
+    const height = top + plotH + 22;
     chartEl.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
     chartEl.setAttribute('width', String(width));
     chartEl.setAttribute('height', String(height));
@@ -996,6 +811,7 @@ const PANEL_SCRIPT = `
     // cpu/memory/gpu 共用左轴的 0-100% 量纲;上传/下载没有天然上限,按这一屏两条线里较大的
     // 那个峰值一起取整成好看的刻度上限(niceMax)——必须用同一个 max,不然上传线和下载线各按
     // 各的峰值伸缩,同样的字节数在图上会画出不一样的高度,读者会看错谁比谁快。
+    // 隐藏中的线也参与 domain 计算:图例点回来时坐标系不跳变,对比才有意义。
     var networkPeak = 0;
     chartActiveDefs.forEach(function (def, i) {
       if (isNetworkKey(def.key) && downsampled[i].length) {
@@ -1028,6 +844,22 @@ const PANEL_SCRIPT = `
         chartEl.appendChild(label);
       }
     }
+    // x 轴时间刻度:起点、1/4、1/2、3/4、终点五个位置取降采样后 timestamps 的对应点,
+    // "哪段负载高发生在什么时候"从此不用逐点悬浮去猜。
+    if (times.length >= 2) {
+      const timeBaseline = top + plotH + 12;
+      for (const frac of [0, 0.25, 0.5, 0.75, 1]) {
+        const idx = Math.min(times.length - 1, Math.round(frac * (times.length - 1)));
+        const tx = Math.min(plotRight, Math.max(gutter, xs[idx] !== undefined ? xs[idx] : gutter + span * frac));
+        const anchor = frac === 0 ? 'start' : (frac === 1 ? 'end' : 'middle');
+        const label = svg('text', { class: 'time-label', x: tx, y: timeBaseline, 'text-anchor': anchor });
+        label.textContent = formatTimeMs(times[idx]);
+        chartEl.appendChild(label);
+      }
+    }
+    // 读屏器/无 JS 场景的最小替身:这条 SVG 讲了什么。文字由扩展侧本地化好送进来,
+    // webview 里写死英文的话中文界面下这一处会漏翻。
+    chartEl.appendChild(svg('title')).textContent = model.chartAriaLabel;
 
     function line(values, className, colorVar, domain) {
       if (values.length < 2) return;
@@ -1042,18 +874,25 @@ const PANEL_SCRIPT = `
       }));
     }
     // 按 legend 顺序(cpu, memory, gpu, 下载, 上传)倒序画:cpu 最受关注,压在最上层不被其他线盖住。
+    // chartDots 与 chartActiveDefs 按位对齐(隐藏的线也占位,只是不画不显示),索引换算用 origIndex。
+    const origIndex = chartActiveDefs.map(function (def, i) { return i; });
+    chartDots = new Array(chartActiveDefs.length);
     for (let i = chartActiveDefs.length - 1; i >= 0; i--) {
-      line(downsampled[i], chartActiveDefs[i].className, chartActiveDefs[i].colorVar, domains[i]);
+      const def = chartActiveDefs[i];
+      if (hiddenKeys[def.key]) continue;
+      line(downsampled[i], def.className, def.colorVar, domains[i]);
     }
-
-    // 悬浮的十字线和每条线各一个圆点:默认透明(见 CSS .guide/.hover-dot),指针移动时才显形。
-    chartGuide = svg('line', { class: 'guide', x1: gutter, y1: top, x2: gutter, y2: top + plotH });
-    chartEl.appendChild(chartGuide);
-    chartDots = chartActiveDefs.map(function (def) {
+    for (const i of origIndex) {
+      const def = chartActiveDefs[i];
+      if (hiddenKeys[def.key]) continue;
       const dot = svg('circle', { class: 'hover-dot', r: 3, fill: def.colorVar });
       chartEl.appendChild(dot);
-      return dot;
-    });
+      chartDots[i] = dot;
+    }
+
+    // 悬浮的十字线:默认透明(见 CSS .guide),指针移动时才显形。
+    chartGuide = svg('line', { class: 'guide', x1: gutter, y1: top, x2: gutter, y2: top + plotH });
+    chartEl.appendChild(chartGuide);
 
     chartData = {
       xs: xs,
