@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/tzzs/remote-pulse/compare/v0.2.0...v0.3.0) (2026-09-20)
+
+
+### Features
+
+* full-review improvements across collectors, status bar, trend panel and tooling ([#11](https://github.com/tzzs/remote-pulse/issues/11)) ([d3049d5](https://github.com/tzzs/remote-pulse/commit/d3049d50c4d1f0bfab607ffae441ebd989a13057))
+
 ## [0.2.0](https://github.com/tzzs/remote-pulse/compare/v0.1.1...v0.2.0) (2026-09-10)
 
 
