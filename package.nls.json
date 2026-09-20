@@ -5,6 +5,10 @@
   "command.configureStatusBarMetrics.title": "Remote Pulse: Configure Status Bar Metrics",
   "command.configureTrendPanelSections.title": "Remote Pulse: Configure Trend Panel Sections",
   "command.configureTrendChartMetrics.title": "Remote Pulse: Configure Trend Chart Metrics",
+  "command.toggleEnabled.title": "Remote Pulse: Pause / Resume Monitoring",
+  "command.showLog.title": "Remote Pulse: Show Log",
+  "command.exportSnapshot.title": "Remote Pulse: Export Snapshot History",
+  "config.enabled.description": "Master switch; when off, all polling stops and the status bar shows a paused icon. Run \"Remote Pulse: Pause / Resume Monitoring\" to toggle",
   "config.refreshInterval.description": "Refresh interval for high-frequency foreground metrics (CPU/memory), in milliseconds",
   "config.backgroundInterval.description": "Reduced refresh interval used once the window loses focus, in milliseconds",
   "config.heavyMetricInterval.description": "Separate polling interval for low-frequency metrics like GPU/Docker, in milliseconds",
@@ -14,6 +18,7 @@
   "config.statusBarMetrics.markdownDescription": "Which metrics to show as status bar items; the rest still appear in the trend panel. Run `Remote Pulse: Configure Status Bar Metrics` from the Command Palette to pick from all options at once.",
   "config.statusBarMetrics.cpu.description": "CPU usage",
   "config.statusBarMetrics.memory.description": "Memory usage",
+  "config.statusBarMetrics.disk.description": "Disk usage of the fullest mount point; all mount points still appear in the tooltip and trend panel",
   "config.statusBarMetrics.gpu.description": "GPU utilization of the primary GPU only (requires nvidia-smi); all GPUs still appear in the trend panel",
   "config.statusBarMetrics.network.description": "Network download/upload rate, shown separately with arrow icons",
   "config.trendPanelSections.description": "Which optional sections to show in the trend panel; System and Storage are always shown. Run \"Remote Pulse: Configure Trend Panel Sections\" from the Command Palette to pick from all options at once.",
@@ -27,6 +32,6 @@
   "config.trendChartMetrics.memory.description": "Memory usage",
   "config.trendChartMetrics.gpu.description": "GPU utilization of the primary GPU only (requires nvidia-smi)",
   "config.trendChartMetrics.network.description": "Network download/upload rate, plotted as two separate lines on their own right-hand axis",
-  "config.enableNotifications.description": "Whether to show a system notification when the critical threshold is crossed",
+  "config.enableNotifications.description": "Whether to show a system notification when CPU, memory, or disk crosses the critical threshold (fires once per crossing, with a mute option)",
   "config.diskMountPoints.description": "Disk mount points to monitor; leave empty to show every real mount point, sorted by usage"
 }

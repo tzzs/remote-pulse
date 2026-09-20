@@ -34,6 +34,20 @@ export function formatRate(bytesPerSec: number): string {
   return `${formatBytes(bytesPerSec)}/s`;
 }
 
+/**
+ * 状态栏专用的定宽速率格式:数字部分右对齐补齐到 5 字符(0-99999,覆盖到 99.9 GB/s),
+ * 单位保持原位。每轮刷新宽度恒定,不会因 9.8 KB/s → 240.0 KB/s 的长度变化把状态栏
+ * 图标推得左右抖动。
+ */
+export function formatRateFixed(bytesPerSec: number, width = 5): string {
+  const text = formatRate(bytesPerSec);
+  const match = /^([\d.]+) (.+)$/.exec(text);
+  if (!match) {
+    return text;
+  }
+  return match[1].padStart(width, ' ') + ' ' + match[2];
+}
+
 export function formatUptime(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
     return '-';

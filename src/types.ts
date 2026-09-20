@@ -73,3 +73,6 @@ export interface Snapshot {
 export type AlertLevel = 'normal' | 'warning' | 'critical';
 
 export type CollectionState = 'loading' | 'ok' | 'error';
+
+/** 可选数据源(GPU/Docker)的可用性状态,趋势面板据此给出明确的空态提示。 */
+export type CollectorAvailability = 'pending' | 'available' | 'not_installed' | 'no_permission';

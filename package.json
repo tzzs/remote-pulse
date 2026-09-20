@@ -9,7 +9,8 @@
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Visualization"
   ],
   "keywords": [
     "remote-ssh",
@@ -64,11 +65,31 @@
         "command": "remotePulse.configureTrendChartMetrics",
         "title": "%command.configureTrendChartMetrics.title%",
         "category": "Remote Pulse"
+      },
+      {
+        "command": "remotePulse.toggleEnabled",
+        "title": "%command.toggleEnabled.title%",
+        "category": "Remote Pulse"
+      },
+      {
+        "command": "remotePulse.showLog",
+        "title": "%command.showLog.title%",
+        "category": "Remote Pulse"
+      },
+      {
+        "command": "remotePulse.exportSnapshot",
+        "title": "%command.exportSnapshot.title%",
+        "category": "Remote Pulse"
       }
     ],
     "configuration": {
       "title": "Remote Pulse",
       "properties": {
+        "remotePulse.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.enabled.description%"
+        },
         "remotePulse.refreshInterval": {
           "type": "number",
           "default": 2000,
@@ -108,12 +129,14 @@
             "enum": [
               "cpu",
               "memory",
+              "disk",
               "gpu",
               "network"
             ],
             "enumDescriptions": [
               "%config.statusBarMetrics.cpu.description%",
               "%config.statusBarMetrics.memory.description%",
+              "%config.statusBarMetrics.disk.description%",
               "%config.statusBarMetrics.gpu.description%",
               "%config.statusBarMetrics.network.description%"
             ]
@@ -195,6 +218,7 @@
     "build": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "compile:tests": "tsc -p ./test/tsconfig.test.json",
+    "lint": "eslint .",
     "pretest": "npm run build && npm run compile:tests",
     "test": "node --test out-test/test/*.test.js",
     "pretest:integration": "npm run build && npm run compile:tests",
@@ -208,7 +232,9 @@
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.0.0",
+    "eslint": "^9.39.4",
     "mocha": "^12.0.0",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.70.0"
   }
 }

@@ -23,6 +23,11 @@ export class StatsStore {
     return this.history.toArray();
   }
 
+  /** 暂停/恢复等状态切换时清空历史,避免趋势图横跨空窗期画出假象。 */
+  clear(): void {
+    this.history.clear();
+  }
+
   /** 取最近 windowMs 毫秒内某个数值序列(用于 sparkline / 趋势图),缺失值跳过。 */
   recentValues(windowMs: number, pick: (s: Snapshot) => number | undefined): number[] {
     const now = Date.now();
