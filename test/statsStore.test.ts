@@ -18,9 +18,9 @@ test('maxAlertLevel 取多个级别里最严重的一个', () => {
 test('StatsStore.recentValues 只返回窗口内且已定义的数值', () => {
   const store = new StatsStore(10);
   const now = Date.now();
-  store.push({ timestamp: now - 60_000, cpu: { percent: 10, cores: 4 } });
-  store.push({ timestamp: now - 1000, cpu: { percent: 20, cores: 4 } });
-  store.push({ timestamp: now, memory: { total: 1, used: 1, available: 0, percent: 100 } });
+  store.push({ timestamp: now - 60_000, cpu: { percent: 10, cores: 4, source: 'host' } });
+  store.push({ timestamp: now - 1000, cpu: { percent: 20, cores: 4, source: 'host' } });
+  store.push({ timestamp: now, memory: { total: 1, used: 1, available: 0, percent: 100, source: 'host' } });
 
   const values = store.recentValues(30_000, s => s.cpu?.percent);
   assert.deepEqual(values, [20]);

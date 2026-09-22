@@ -11,11 +11,21 @@ function baseConfig(overrides: Partial<RemotePulseConfig> = {}): RemotePulseConf
     heavyMetricInterval: 10000,
     warningThreshold: 80,
     criticalThreshold: 95,
+    gpuTempWarningThreshold: 80,
+    gpuTempCriticalThreshold: 90,
     statusBarMetrics: ['cpu', 'memory'],
+    statusBarAlignment: 'left',
     trendPanelSections: ['gpu', 'docker'],
     trendChartMetrics: ['cpu', 'memory'],
+    trendWindowMinutes: 30,
+    notificationMetrics: ['cpu', 'memory', 'disk'],
     enableNotifications: false,
     diskMountPoints: [],
+    networkInterfaces: [],
+    gpuSelection: 'primary',
+    topProcessCount: 5,
+    dockerMaxContainers: 20,
+    cgroupAware: true,
     ...overrides,
   };
 }
@@ -23,8 +33,8 @@ function baseConfig(overrides: Partial<RemotePulseConfig> = {}): RemotePulseConf
 function snapshotWith(overrides: Partial<Snapshot> = {}): Snapshot {
   return {
     timestamp: Date.now(),
-    cpu: { percent: 10, cores: 4 },
-    memory: { total: 100, used: 10, available: 90, percent: 10 },
+    cpu: { percent: 10, cores: 4, source: 'host' },
+    memory: { total: 100, used: 10, available: 90, percent: 10, source: 'host' },
     ...overrides,
   };
 }
@@ -62,6 +72,45 @@ suite('PulseStatusBar (integration)', () => {
     assert.equal(network.priority, 996);
   });
 
+  // 对齐方式在 createStatusBarItem 时就定死了,所以它是构造参数;右侧的优先级顺序必须反过来,
+  // 否则四个指标在右侧会镜像成 网络|GPU|内存|CPU。
+  test('honors the right-side alignment and mirrors the priorities so the order stays CPU → network', () => {
+    bar = new PulseStatusBar('right');
+    const { icon, cpu, mem, gpu, network } = bar.debugState;
+    assert.equal(icon.alignment, vscode.StatusBarAlignment.Right);
+    assert.equal(network.alignment, vscode.StatusBarAlignment.Right);
+    assert.ok(icon.priority! < cpu.priority!, 'icon should sit left of CPU on the right-hand side');
+    assert.ok(cpu.priority! < mem.priority!);
+    assert.ok(mem.priority! < gpu.priority!);
+    assert.ok(gpu.priority! < network.priority!);
+  });
+
+  test('every visible item carries the same detail tooltip, so hovering any of them shows the full snapshot', () => {
+    bar = new PulseStatusBar();
+    bar.update(
+      snapshotWith({ uptimeSeconds: 3600 }),
+      baseConfig({ statusBarMetrics: ['cpu', 'memory'] }),
+      'ok',
+      { hostLabel: 'dev-box (10.0.0.2)', cpuHistory: [10, 20, 30], memoryHistory: [40, 50], gpuHistory: [] },
+    );
+    const { icon, cpu, mem } = bar.debugState;
+    for (const item of [icon, cpu, mem]) {
+      assert.ok(item.tooltip instanceof vscode.MarkdownString, 'tooltip should be a MarkdownString');
+      const text = (item.tooltip as vscode.MarkdownString).value;
+      assert.ok(text.includes('dev-box'), 'tooltip should name the host');
+      assert.ok(text.includes('CPU'), 'tooltip should list CPU');
+      assert.ok(text.includes('command:remotePulse.showTrend'), 'tooltip should link to the trend panel');
+    }
+  });
+
+  test('keeps the failure reason in the tooltip instead of dropping it silently', () => {
+    bar = new PulseStatusBar();
+    bar.showError('EACCES: permission denied, open /proc/stat');
+    const tooltip = bar.debugState.icon.tooltip as vscode.MarkdownString;
+    assert.ok(tooltip.value.includes('EACCES'), 'the reason must be reachable from the UI');
+    assert.ok(tooltip.value.includes('command:remotePulse.showLogs'));
+  });
+
   test('starts in a loading state before the first update, with CPU/memory items hidden', () => {
     bar = new PulseStatusBar();
     assert.equal(bar.debugState.icon.text, '$(sync~spin)');
@@ -79,7 +128,7 @@ suite('PulseStatusBar (integration)', () => {
 
   test('shows CPU and memory as independent items once data is available', () => {
     bar = new PulseStatusBar();
-    bar.update(snapshotWith({ cpu: { percent: 12, cores: 8 }, memory: { total: 100, used: 34, available: 66, percent: 34 } }), baseConfig(), 'ok');
+    bar.update(snapshotWith({ cpu: { percent: 12, cores: 8, source: 'host' }, memory: { total: 100, used: 34, available: 66, percent: 34, source: 'host' } }), baseConfig(), 'ok');
     assert.equal(bar.debugState.icon.text, '$(pulse)');
     assert.equal(bar.debugState.cpu.text, 'CPU 12%');
     assert.equal(bar.debugState.mem.text, 'MEM 34%');
@@ -100,7 +149,7 @@ suite('PulseStatusBar (integration)', () => {
 
   test('CPU crossing warning colors only the CPU item and the icon with the warning theme token, memory stays unset', () => {
     bar = new PulseStatusBar();
-    bar.update(snapshotWith({ cpu: { percent: 85, cores: 4 } }), baseConfig(), 'ok');
+    bar.update(snapshotWith({ cpu: { percent: 85, cores: 4, source: 'host' } }), baseConfig(), 'ok');
     assert.equal(themeColorId(bar.debugState.cpu.color), WARNING_FG);
     assert.equal(themeColorId(bar.debugState.cpu.backgroundColor), WARNING_BG);
     assert.equal(bar.debugState.mem.color, undefined);
@@ -110,7 +159,7 @@ suite('PulseStatusBar (integration)', () => {
 
   test('memory going critical alone colors only memory and the icon with the error theme token, CPU stays unset, and the icon glyph swaps to the warning triangle', () => {
     bar = new PulseStatusBar();
-    bar.update(snapshotWith({ memory: { total: 100, used: 99, available: 1, percent: 99 } }), baseConfig(), 'ok');
+    bar.update(snapshotWith({ memory: { total: 100, used: 99, available: 1, percent: 99, source: 'host' } }), baseConfig(), 'ok');
     assert.equal(themeColorId(bar.debugState.mem.color), ERROR_FG);
     assert.equal(themeColorId(bar.debugState.mem.backgroundColor), ERROR_BG);
     assert.equal(bar.debugState.cpu.color, undefined);
@@ -121,20 +170,26 @@ suite('PulseStatusBar (integration)', () => {
 
   test('CPU critical and memory warning at once keep their own theme tokens, icon follows the worse of the two', () => {
     bar = new PulseStatusBar();
-    bar.update(snapshotWith({ cpu: { percent: 96, cores: 4 }, memory: { total: 100, used: 82, available: 18, percent: 82 } }), baseConfig(), 'ok');
+    bar.update(snapshotWith({ cpu: { percent: 96, cores: 4, source: 'host' }, memory: { total: 100, used: 82, available: 18, percent: 82, source: 'host' } }), baseConfig(), 'ok');
     assert.equal(themeColorId(bar.debugState.cpu.color), ERROR_FG);
     assert.equal(themeColorId(bar.debugState.mem.color), WARNING_FG);
     assert.equal(themeColorId(bar.debugState.icon.color), ERROR_FG);
   });
 
-  test('the alert icon carries a tooltip explaining its click target, the metric items stay tooltip-less', () => {
+  // 状态栏一项只放得下一个数字,悬浮层才是详情的容器(设计方案 2.2)。
+  // 每一项都挂同一份 tooltip:鼠标扫到哪一项都能看到完整快照,不用记"哪个数字属于哪台机器"。
+  test('every item carries the detail tooltip, including the ones that are currently hidden', () => {
     bar = new PulseStatusBar();
     bar.update(snapshotWith(), baseConfig(), 'ok');
-    assert.notEqual(bar.debugState.icon.tooltip, undefined);
-    assert.equal(bar.debugState.cpu.tooltip, undefined);
-    assert.equal(bar.debugState.mem.tooltip, undefined);
-    assert.equal(bar.debugState.gpu.tooltip, undefined);
-    assert.equal(bar.debugState.network.tooltip, undefined);
+    for (const item of Object.values(bar.debugState)) {
+      assert.ok(item.tooltip instanceof vscode.MarkdownString, 'every item should carry a MarkdownString tooltip');
+    }
+  });
+
+  test('the loading state explains itself instead of showing a bare spinner', () => {
+    bar = new PulseStatusBar();
+    const tooltip = bar.debugState.icon.tooltip as vscode.MarkdownString;
+    assert.ok(tooltip.value.length > 0);
   });
 
   test('showError sets an error icon and hides CPU/memory', () => {
@@ -148,7 +203,7 @@ suite('PulseStatusBar (integration)', () => {
   test('statusBarMetrics can hide memory, leaving only CPU visible and the icon following CPU alone', () => {
     bar = new PulseStatusBar();
     bar.update(
-      snapshotWith({ memory: { total: 100, used: 99, available: 1, percent: 99 } }),
+      snapshotWith({ memory: { total: 100, used: 99, available: 1, percent: 99, source: 'host' } }),
       baseConfig({ statusBarMetrics: ['cpu'] }),
       'ok',
     );

@@ -49,3 +49,25 @@ export function formatUptime(totalSeconds: number): string {
   }
   return `${minutes}m`;
 }
+
+/**
+ * 把任意长度的历史序列压到 sparkline 能显示的宽度(默认 20 个块字符)。
+ * 均值降采样而不是等距抽样:抽样会把一次短暂的尖峰整个漏掉,均值至少让那一格抬起来。
+ */
+export function sampleForSparkline(values: number[], width = 20): number[] {
+  if (values.length <= width) {
+    return values;
+  }
+  const bucket = values.length / width;
+  const out: number[] = [];
+  for (let i = 0; i < width; i += 1) {
+    const from = Math.floor(i * bucket);
+    const to = Math.max(from + 1, Math.min(values.length, Math.floor((i + 1) * bucket)));
+    let sum = 0;
+    for (let j = from; j < to; j += 1) {
+      sum += values[j];
+    }
+    out.push(sum / (to - from));
+  }
+  return out;
+}

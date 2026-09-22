@@ -1,8 +1,12 @@
 import * as fs from 'fs';
 import { DiskStats, MountEntry } from '../types';
 import { isPathReadable } from '../util/platform';
+import { logThrottled } from '../util/logger';
 
 const PROC_MOUNTS = '/proc/mounts';
+
+/** 单个挂载点的 statfs 超时。挂死的 NFS/CIFS 会让 statfs 在 libuv 线程池里无限期挂住。 */
+const STATFS_TIMEOUT_MS = 2000;
 
 /** 虚拟/伪文件系统,不代表真实磁盘容量,展示这些挂载点对用户没有意义。 */
 const IGNORED_FS_TYPES = new Set([
@@ -33,23 +37,53 @@ async function readMountList(): Promise<MountEntry[]> {
   return parseMounts(content);
 }
 
+/**
+ * 口径与 `df` 完全一致,这很重要:用户会拿面板里的数字和自己在终端敲的 df 对照,对不上就会当成 bug。
+ *
+ * - 已用 = (blocks - bfree) × bsize —— 真正被文件占掉的部分
+ * - 百分比 = 已用 /(已用 + 可用),分母**不是** total
+ *
+ * 差别来自 ext4 默认给 root 预留的 5% 块:它既不是"已用"也不对普通用户"可用"。
+ * 早先的实现用 bavail 反推已用(used = total - bavail),等于把这 5% 算进了占用——
+ * 一块全空的 1 TB 盘会显示 5%,而 df 显示 0%。
+ * total 仍然按 blocks 报告,和 df 的 Size 列一致;因此 used/total 与 percent 不会完全相等,这是 df 本来的行为。
+ */
 export function calcDiskStatsFromStatfs(
   mountPoint: string,
-  stats: { blocks: number; bsize: number; bavail: number },
+  stats: { blocks: number; bsize: number; bavail: number; bfree?: number },
 ): DiskStats {
   const total = stats.blocks * stats.bsize;
-  const free = stats.bavail * stats.bsize;
+  // bfree 缺失时退回旧口径,保证异常平台上仍有数可看。
+  const free = (stats.bfree ?? stats.bavail) * stats.bsize;
+  const available = stats.bavail * stats.bsize;
   const used = Math.max(0, total - free);
-  return { mountPoint, total, used, percent: total === 0 ? 0 : (used / total) * 100 };
+  const capacity = used + available;
+  return { mountPoint, total, used, percent: capacity === 0 ? 0 : (used / capacity) * 100 };
+}
+
+/** statfs 本身没有超时参数,用 Promise.race 给它加一个——超时的挂载点当作读不到,整轮采集继续。 */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | undefined> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      logThrottled(`disk-timeout:${label}`, `statfs timed out after ${ms}ms: ${label}`);
+      resolve(undefined);
+    }, ms);
+    promise.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      },
+    );
+  });
 }
 
 async function readDiskUsage(mountPoint: string): Promise<DiskStats | undefined> {
-  try {
-    const stats = await fs.promises.statfs(mountPoint);
-    return calcDiskStatsFromStatfs(mountPoint, stats);
-  } catch {
-    return undefined;
-  }
+  const stats = await withTimeout(fs.promises.statfs(mountPoint), STATFS_TIMEOUT_MS, mountPoint);
+  return stats ? calcDiskStatsFromStatfs(mountPoint, stats) : undefined;
 }
 
 function pathDepth(mountPoint: string): number {

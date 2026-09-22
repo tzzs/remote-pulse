@@ -24,3 +24,26 @@ export function visualWidth(text: string): number {
 export function padLabel(label: string, targetWidth: number): string {
   return label + ' '.repeat(Math.max(0, targetWidth - visualWidth(label)));
 }
+
+/** 状态栏 tooltip 里的一行:标签 | sparkline | 数值 | 明细。 */
+export interface TooltipRow {
+  label: string;
+  spark: string;
+  value: string;
+  detail: string;
+}
+
+export function formatTooltipTable(rows: TooltipRow[]): string {
+  const labelWidth = Math.max(0, ...rows.map(r => visualWidth(r.label)));
+  const sparkWidth = Math.max(0, ...rows.map(r => visualWidth(r.spark)));
+  const valueWidth = Math.max(0, ...rows.map(r => visualWidth(r.value)));
+  return rows
+    .map(row => {
+      const spark = sparkWidth > 0 ? `  ${padLabel(row.spark, sparkWidth)}` : '';
+      // 数值列右对齐:百分比是等宽数字,左对齐会让 9% 和 61% 的个位数错开一格。
+      const value = valueWidth > 0 ? `  ${' '.repeat(Math.max(0, valueWidth - visualWidth(row.value)))}${row.value}` : '';
+      const detail = row.detail ? `  ${row.detail}` : '';
+      return `${padLabel(row.label, labelWidth)}${spark}${value}${detail}`.trimEnd();
+    })
+    .join('\n');
+}

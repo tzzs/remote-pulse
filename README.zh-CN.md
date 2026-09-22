@@ -36,15 +36,19 @@ CPU、内存、GPU(仅第一张卡)、网络最多可以是四个独立着色的
 
 ## 功能
 
-- **CPU**:总体使用率、核心数(`/proc/stat` 增量算法,非 loadavg)
-- **内存**:使用率、已用/总量(`MemAvailable` 而非 `MemFree`,更贴近真实可用内存)
-- **磁盘**:各挂载点使用率(自动过滤虚拟文件系统;total/used 字节数完全相同的挂载点——同一块盘被 bind mount 到了不止一个路径,比如 WSL2 里 `/mnt/wslg/distro` 和 `/` 其实是同一块盘——会被合并,只保留路径更浅的那个;默认展示合并去重后的全部真实挂载点、按使用率从高到低排,或手动指定挂载点只看这几个)
-- **网络**:下载/上传速率,任何地方都是分开展示两个数(状态栏图标、图表线条、箭头),从不合并成一个数——合并了就看不出哪个方向在跑流量;可选画进过去 30 分钟图表(下载/上传各一条线,共用同一段独立右侧坐标轴,按窗口内两条线里较大的峰值一起归一化,因为网络速率不像 CPU/内存那样天然有 0-100% 的上限),通过 `trendChartMetrics` 单独控制,默认关闭,且和网络速率是否以文字行展示是两码事
-- **GPU**:显存占用、利用率、温度(需要 `nvidia-smi`,不存在则模块整体不激活)
-- **Docker**:运行中容器数与各容器 CPU/内存占用(需要可访问 `/var/run/docker.sock`,无权限则静默降级)
-- **阈值告警**:CPU 和内存各自越过警告/严重阈值时独立变为黄色/红色,可选弹出系统通知(仅在"跨越"到严重态时通知一次,避免刷屏)
-- **历史趋势**:最近 30 分钟的 Webview 折线图
-- **自适应轮询**:窗口失焦后自动降频,减少对远程机器的干扰
+- **CPU**:总体使用率、核心数(`/proc/stat` 增量算法,非 loadavg),另附按核数折算的 1/5/15 分钟负载
+- **内存**:使用率、已用/总量(`MemAvailable` 而非 `MemFree`,更贴近真实可用内存);主机配置了 swap 时自动显示交换分区用量
+- **容器感知**:在 Dev Container / Codespaces 中按 cgroup 配额(v1、v2 均支持)而不是宿主机 `/proc` 的数值统计 CPU 与内存,并标注 `cgroup 限额`,让你知道分母是什么(`remotePulse.cgroupAware`)
+- **磁盘**:各挂载点使用率,口径与 `df` 完全一致(root 预留块不计入已用;自动过滤虚拟文件系统;同一块盘的 bind mount 合并为路径更浅的那个;按使用率排序)。可选读写吞吐(`/proc/diskstats`,只统计整块设备,不重复计算分区)
+- **网络**:下载/上传速率,任何地方都分开展示两个数。默认排除虚拟网卡(`docker0`、`veth*`、`br-*`、`tun*` 等),它们的流量要么是容器内部的,要么会被重复计算;可用 `remotePulse.networkInterfaces` 指定网卡
+- **GPU**:显存占用、利用率、温度(需要 `nvidia-smi`)。多卡主机可选择状态栏和图表跟随 GPU 0 还是最忙的卡(`remotePulse.gpuSelection`)。温度有独立的 °C 阈值
+- **进程 Top N**:可选的高 CPU 进程列表,进程 CPU% 与总 CPU 行同一口径
+- **Docker**:运行中容器数与各容器 CPU/内存占用,限制并发并设容器上限,容器多的主机不会压垮 daemon
+- **悬浮详情**:每个状态栏项都带 tooltip,展示主机、最近 5 分钟的 sparkline 以及全部已采集指标
+- **阈值告警**:CPU 和内存各自独立变黄/变红;可选对 CPU/内存/磁盘/GPU 弹出通知(`remotePulse.notificationMetrics`),每次越界只通知一次,并提供"查看趋势图"/"静音 1 小时"
+- **历史趋势**:时间窗口可配置的 Webview 折线图(`remotePulse.trendWindowMinutes`);为屏幕阅读器提供区块地标、进度条语义与图表文字描述
+- **自适应轮询**:窗口失焦后自动降频;变化慢的指标(磁盘、GPU、Docker、进程)走独立的低频循环
+- **可诊断**:采集失败在界面上保持安静,但会记录到 `Remote Pulse` 输出通道(`Remote Pulse: 查看日志`)
 - **界面本地化**:命令、设置项、状态栏/Webview 文案跟随 VS Code 显示语言自动切换(默认英文,内置简体中文翻译)
 
 ## 安装
@@ -69,31 +73,47 @@ code --install-extension remote-pulse-<version>.vsix
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `remotePulse.refreshInterval` | `2000` | 前台高频指标(CPU/内存)刷新间隔(ms) |
-| `remotePulse.backgroundInterval` | `15000` | 窗口失焦后的降频间隔(ms) |
-| `remotePulse.heavyMetricInterval` | `10000` | GPU/Docker 等低频指标独立轮询间隔(ms) |
-| `remotePulse.warningThreshold` | `80` | 告警阈值(%) |
+| `remotePulse.refreshInterval` | `2000` | 前台高频指标(CPU/内存/网络)刷新间隔,单位 ms |
+| `remotePulse.backgroundInterval` | `15000` | 窗口失焦后的降频刷新间隔,单位 ms |
+| `remotePulse.heavyMetricInterval` | `10000` | 低频指标(磁盘、GPU、Docker、进程)的轮询间隔,单位 ms |
+| `remotePulse.warningThreshold` | `80` | 告警阈值(%)。若比严重阈值还高,两者会自动互换 |
 | `remotePulse.criticalThreshold` | `95` | 严重阈值(%) |
-| `remotePulse.statusBarMetrics` | `["cpu", "memory"]` | 状态栏要展示哪些指标——`cpu`、`memory`、`gpu`(仅第一张卡)、`network`(下载/上传用箭头图标分开展示);未选中的指标仍然能在趋势面板里看到。运行「Remote Pulse: 配置状态栏指标」获得真正的多选勾选框 |
-| `remotePulse.trendPanelSections` | `["gpu", "docker"]` | 趋势面板正文要展示哪些可选区块/行(GPU 卡片、Docker 表格、"System"里的网络那一行);System 和 Storage 始终展示。和 `trendChartMetrics` 相互独立,不影响图表。运行「Remote Pulse: 配置趋势面板板块」获得真正的多选勾选框 |
-| `remotePulse.trendChartMetrics` | `["cpu", "memory"]` | 30 分钟折线图里要画哪几条线——`cpu`、`memory`、`gpu`(仅第一张卡)、`network`(下载/上传各一条线,共用独立右侧坐标轴)。和 `trendPanelSections`、`statusBarMetrics` 相互独立。运行「Remote Pulse: 配置趋势图指标」获得真正的多选勾选框 |
-| `remotePulse.enableNotifications` | `false` | 越过严重阈值时是否弹出系统通知 |
-| `remotePulse.diskMountPoints` | `[]` | 指定要监控的挂载点,留空则展示全部真实挂载点(按使用率从高到低排) |
+| `remotePulse.gpuTempWarningThreshold` | `80` | GPU 温度告警阈值(°C) |
+| `remotePulse.gpuTempCriticalThreshold` | `90` | GPU 温度严重阈值(°C) |
+| `remotePulse.statusBarMetrics` | `["cpu", "memory"]` | 状态栏展示的指标 —— `cpu`、`memory`、`gpu`、`network`。运行 `Remote Pulse: 配置状态栏指标` 可多选 |
+| `remotePulse.statusBarAlignment` | `"left"` | `left`(靠近远程指示器)或 `right` |
+| `remotePulse.trendPanelSections` | `["gpu", "docker"]` | 面板可选板块 —— `network`、`diskIo`、`gpu`、`processes`、`docker`。System 与 Storage 始终显示,与图表相互独立 |
+| `remotePulse.trendChartMetrics` | `["cpu", "memory"]` | 趋势图中的折线 —— `cpu`、`memory`、`gpu`、`network`(下载/上传画在独立的右侧坐标轴上) |
+| `remotePulse.trendWindowMinutes` | `30` | 趋势图覆盖的历史时长(1–240 分钟),内存中的历史容量随它与刷新间隔自动调整 |
+| `remotePulse.enableNotifications` | `false` | 越过严重阈值时是否弹出通知 |
+| `remotePulse.notificationMetrics` | `["cpu", "memory", "disk"]` | 哪些指标可以触发通知 —— `cpu`、`memory`、`disk`、`gpu` |
+| `remotePulse.diskMountPoints` | `[]` | 要监控的挂载点;留空 = 全部真实挂载点,按使用率排序 |
+| `remotePulse.networkInterfaces` | `[]` | 要统计的网卡;留空 = 全部物理网卡(排除虚拟网卡) |
+| `remotePulse.gpuSelection` | `"primary"` | 多卡主机上状态栏与图表跟随哪张卡 —— `primary` 或 `busiest` |
+| `remotePulse.topProcessCount` | `5` | 进程 Top 板块的行数 |
+| `remotePulse.dockerMaxContainers` | `20` | 最多为多少个容器拉取明细,其余只计入总数 |
+| `remotePulse.cgroupAware` | `true` | 存在 cgroup 配额时按配额统计 CPU/内存 |
 
 ## 命令
 
-- `Remote Pulse: 显示趋势图`(`remotePulse.showTrend`,也绑定在 CPU/内存/GPU/网络状态栏项的点击上)
+命令只在远程窗口(插件真正在监控时)出现在命令面板中。
+
+- `Remote Pulse: 显示趋势图`(`remotePulse.showTrend`,点击状态栏的 CPU/内存/GPU/网络项同样触发)
 - `Remote Pulse: 立即刷新`(`remotePulse.refresh`)
-- `Remote Pulse: 配置状态栏指标`(`remotePulse.configureStatusBarMetrics`,也绑定在告警图标的点击上)
+- `Remote Pulse: 查看日志`(`remotePulse.showLogs`)
+- `Remote Pulse: 配置状态栏指标`(`remotePulse.configureStatusBarMetrics`,点击告警图标同样触发)
 - `Remote Pulse: 配置趋势面板板块`(`remotePulse.configureTrendPanelSections`)
 - `Remote Pulse: 配置趋势图指标`(`remotePulse.configureTrendChartMetrics`)
+- `Remote Pulse: 配置通知指标`(`remotePulse.configureNotificationMetrics`)
 
 ## 边界情况
 
-- **非 Linux 远程主机**:CPU/内存自动回退到 Node.js `os` 模块(精度略低),网络模块因无跨平台等价物而直接隐藏
-- **首次连接**:状态栏先显示 `$(sync~spin)` 加载态
-- **采集失败**(权限/网络抖动):显示 `$(circle-slash)`,不弹烦人的错误通知
-- **GPU/Docker 不可用**:启动时探测一次,不存在/无权限则该模块整体不激活,不反复重试
+- **非 Linux 远程主机**:CPU/内存自动回退到 Node.js `os` 模块(精度略低),网络、磁盘读写、进程模块因无跨平台等价物而直接隐藏
+- **首次连接**:状态栏先显示 `$(sync~spin)` 加载态,tooltip 中说明正在采集
+- **部分采集失败**:各采集器独立结算——某一路失败时沿用上一次的值若干轮后再清空,不会连带其他指标一起消失
+- **全部采集失败**:显示 `$(circle-slash)`,原因写在 tooltip 与输出通道里,不弹烦人的错误通知
+- **挂死的网络挂载**:每次 `statfs` 2 秒超时,失联的 NFS/CIFS 不会拖住扩展宿主
+- **GPU/Docker 不可用**:每 5 分钟重新探测一次,之后启动 Docker daemon 或装上驱动都能被识别,无需重载窗口
 
 ## 开发
 
@@ -101,9 +121,18 @@ code --install-extension remote-pulse-<version>.vsix
 npm install
 npm run build     # tsc 编译到 out/
 npm test          # 编译并运行 test/ 下的单元测试(node:test)
+npm run lint      # 对 src/、test/ 以及 media/ 下的 webview 脚本运行 ESLint
 npm run test:integration  # 在真实 VS Code 扩展宿主里跑 test/integration/(@vscode/test-cli)
 npm run package   # vsce package 生成 .vsix
 ```
+
+如果集成测试宿主启动时报 `listen EINVAL … .sock`(在 git worktree 或嵌套很深的目录里很常见——Unix socket 路径上限 103 个字符),把用户数据目录指到短路径即可:
+
+```bash
+VSCODE_TEST_USER_DATA_DIR=/tmp/rp-ud npm run test:integration
+```
+
+趋势面板的样式和脚本以真实文件形式放在 `media/` 下;`media/chart.js` 承载图表的计算逻辑,由 `test/chart.test.mjs` 直接做单元测试。
 
 在 VSCode 中打开本项目,按 `F5` 启动 Extension Development Host 即可实时调试(本地 macOS/Windows 环境下 CPU/内存会走 `os` 模块兜底路径,便于在没有远程 Linux 主机时也能验证核心交互)。
 

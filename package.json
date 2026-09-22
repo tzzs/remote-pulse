@@ -9,6 +9,7 @@
     "vscode": "^1.85.0"
   },
   "categories": [
+    "Visualization",
     "Other"
   ],
   "keywords": [
@@ -51,6 +52,11 @@
         "category": "Remote Pulse"
       },
       {
+        "command": "remotePulse.showLogs",
+        "title": "%command.showLogs.title%",
+        "category": "Remote Pulse"
+      },
+      {
         "command": "remotePulse.configureStatusBarMetrics",
         "title": "%command.configureStatusBarMetrics.title%",
         "category": "Remote Pulse"
@@ -63,6 +69,11 @@
       {
         "command": "remotePulse.configureTrendChartMetrics",
         "title": "%command.configureTrendChartMetrics.title%",
+        "category": "Remote Pulse"
+      },
+      {
+        "command": "remotePulse.configureNotificationMetrics",
+        "title": "%command.configureNotificationMetrics.title%",
         "category": "Remote Pulse"
       }
     ],
@@ -101,6 +112,20 @@
           "maximum": 100,
           "description": "%config.criticalThreshold.description%"
         },
+        "remotePulse.gpuTempWarningThreshold": {
+          "type": "number",
+          "default": 80,
+          "minimum": 1,
+          "maximum": 150,
+          "description": "%config.gpuTempWarningThreshold.description%"
+        },
+        "remotePulse.gpuTempCriticalThreshold": {
+          "type": "number",
+          "default": 90,
+          "minimum": 1,
+          "maximum": 150,
+          "description": "%config.gpuTempCriticalThreshold.description%"
+        },
         "remotePulse.statusBarMetrics": {
           "type": "array",
           "items": {
@@ -126,18 +151,35 @@
           "description": "%config.statusBarMetrics.description%",
           "markdownDescription": "%config.statusBarMetrics.markdownDescription%"
         },
+        "remotePulse.statusBarAlignment": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "enumDescriptions": [
+            "%config.statusBarAlignment.left.description%",
+            "%config.statusBarAlignment.right.description%"
+          ],
+          "default": "left",
+          "description": "%config.statusBarAlignment.description%"
+        },
         "remotePulse.trendPanelSections": {
           "type": "array",
           "items": {
             "type": "string",
             "enum": [
               "network",
+              "diskIo",
               "gpu",
+              "processes",
               "docker"
             ],
             "enumDescriptions": [
               "%config.trendPanelSections.network.description%",
+              "%config.trendPanelSections.diskIo.description%",
               "%config.trendPanelSections.gpu.description%",
+              "%config.trendPanelSections.processes.description%",
               "%config.trendPanelSections.docker.description%"
             ]
           },
@@ -174,6 +216,39 @@
           "description": "%config.trendChartMetrics.description%",
           "markdownDescription": "%config.trendChartMetrics.markdownDescription%"
         },
+        "remotePulse.trendWindowMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 240,
+          "description": "%config.trendWindowMinutes.description%"
+        },
+        "remotePulse.notificationMetrics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "cpu",
+              "memory",
+              "disk",
+              "gpu"
+            ],
+            "enumDescriptions": [
+              "%config.notificationMetrics.cpu.description%",
+              "%config.notificationMetrics.memory.description%",
+              "%config.notificationMetrics.disk.description%",
+              "%config.notificationMetrics.gpu.description%"
+            ]
+          },
+          "uniqueItems": true,
+          "default": [
+            "cpu",
+            "memory",
+            "disk"
+          ],
+          "description": "%config.notificationMetrics.description%",
+          "markdownDescription": "%config.notificationMetrics.markdownDescription%"
+        },
         "remotePulse.enableNotifications": {
           "type": "boolean",
           "default": false,
@@ -186,8 +261,81 @@
           },
           "default": [],
           "description": "%config.diskMountPoints.description%"
+        },
+        "remotePulse.networkInterfaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%config.networkInterfaces.description%"
+        },
+        "remotePulse.gpuSelection": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "busiest"
+          ],
+          "enumDescriptions": [
+            "%config.gpuSelection.primary.description%",
+            "%config.gpuSelection.busiest.description%"
+          ],
+          "default": "primary",
+          "description": "%config.gpuSelection.description%"
+        },
+        "remotePulse.topProcessCount": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 30,
+          "description": "%config.topProcessCount.description%"
+        },
+        "remotePulse.dockerMaxContainers": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 200,
+          "description": "%config.dockerMaxContainers.description%"
+        },
+        "remotePulse.cgroupAware": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.cgroupAware.description%",
+          "markdownDescription": "%config.cgroupAware.markdownDescription%"
         }
       }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "remotePulse.showTrend",
+          "when": "remotePulse.active"
+        },
+        {
+          "command": "remotePulse.refresh",
+          "when": "remotePulse.active"
+        },
+        {
+          "command": "remotePulse.showLogs",
+          "when": "remotePulse.active"
+        },
+        {
+          "command": "remotePulse.configureStatusBarMetrics",
+          "when": "remotePulse.active"
+        },
+        {
+          "command": "remotePulse.configureTrendPanelSections",
+          "when": "remotePulse.active"
+        },
+        {
+          "command": "remotePulse.configureTrendChartMetrics",
+          "when": "remotePulse.active"
+        },
+        {
+          "command": "remotePulse.configureNotificationMetrics",
+          "when": "remotePulse.active"
+        }
+      ]
     }
   },
   "scripts": {
@@ -196,19 +344,23 @@
     "watch": "tsc -watch -p ./",
     "compile:tests": "tsc -p ./test/tsconfig.test.json",
     "pretest": "npm run build && npm run compile:tests",
-    "test": "node --test out-test/test/*.test.js",
+    "test": "node --test out-test/test/*.test.js test/*.test.mjs",
     "pretest:integration": "npm run build && npm run compile:tests",
     "test:integration": "vscode-test",
-    "package": "vsce package"
+    "package": "vsce package",
+    "lint": "eslint ."
   },
   "devDependencies": {
+    "@eslint/js": "^9.13.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.85.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.0.0",
+    "eslint": "^9.13.0",
     "mocha": "^12.0.0",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.12.0"
   }
 }

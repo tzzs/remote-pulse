@@ -18,10 +18,25 @@ overlay /var/lib/docker/overlay2/xyz/merged overlay rw 0 0
   );
 });
 
-test('calcDiskStatsFromStatfs 按 blocks*bsize 换算容量', () => {
-  const stats = calcDiskStatsFromStatfs('/', { blocks: 1000, bsize: 4096, bavail: 250 });
+test('calcDiskStatsFromStatfs 的百分比口径与 df 一致', () => {
+  // 1000 块总量,300 块空闲,其中普通用户只能用 250 块(50 块是 ext4 给 root 的预留)。
+  // df: 已用 = 1000-300 = 700,Use% = 700/(700+250) = 73.7%
+  const stats = calcDiskStatsFromStatfs('/', { blocks: 1000, bsize: 4096, bavail: 250, bfree: 300 });
   assert.equal(stats.total, 1000 * 4096);
-  assert.equal(stats.used, (1000 - 250) * 4096);
+  assert.equal(stats.used, 700 * 4096);
+  assert.ok(Math.abs(stats.percent - (700 / 950) * 100) < 1e-6);
+});
+
+test('calcDiskStatsFromStatfs 不再把 root 预留块算成已用', () => {
+  // 回归:旧实现 used = total - bavail,一块全空的盘会显示 5%,而 df 显示 0%。
+  const empty = calcDiskStatsFromStatfs('/', { blocks: 1000, bsize: 4096, bavail: 950, bfree: 1000 });
+  assert.equal(empty.used, 0);
+  assert.equal(empty.percent, 0);
+});
+
+test('calcDiskStatsFromStatfs 在缺少 bfree 的平台上退回旧口径,而不是报错', () => {
+  const stats = calcDiskStatsFromStatfs('/', { blocks: 1000, bsize: 4096, bavail: 250 });
+  assert.equal(stats.used, 750 * 4096);
   assert.equal(stats.percent, 75);
 });
 

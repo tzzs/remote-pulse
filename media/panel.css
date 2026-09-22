@@ -1,0 +1,137 @@
+  * { box-sizing: border-box; }
+  :root {
+    --rp-muted: var(--vscode-descriptionForeground);
+    --rp-hairline: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+    --rp-track: rgba(128, 128, 128, 0.25);
+    --rp-warning: var(--vscode-editorWarning-foreground, #cca700);
+    --rp-critical: var(--vscode-editorError-foreground, #f14c4c);
+    --rp-cpu: var(--vscode-charts-blue, #3794ff);
+    --rp-mem: var(--vscode-charts-purple, #b180d7);
+    --rp-net-rx: var(--vscode-charts-green, #89d185);
+    --rp-net-tx: var(--vscode-charts-yellow, #cca700);
+    --rp-gpu: var(--vscode-charts-orange, #d18616);
+  }
+  body {
+    margin: 0;
+    background: var(--vscode-editor-background);
+    color: var(--vscode-foreground);
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size, 13px);
+    line-height: 20px;
+  }
+  /* 超宽窗口里一行从最左标签跑到最右数值,眼睛要横扫整屏才能读完一条——
+     限宽居中是 VS Code 设置页同样的处理,读起来才不费劲。 */
+  .panel { padding: 16px 20px 28px; max-width: 980px; margin: 0 auto; }
+
+  /* 三级层级:主机名 15px 实心 > 区块标题 11px 大写加分隔线 > 行内容 13px。
+     区块标题靠"大写 + 满宽细线 + 上方留白"确立边界,而不是靠字号压过正文。 */
+  .host { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 16px; flex-wrap: wrap;
+          padding-bottom: 14px; border-bottom: 1px solid var(--rp-hairline); }
+  .host-id { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 1 auto; }
+  .host-icon { align-self: center; flex-shrink: 0; }
+  .host-name { font-size: 15px; font-weight: 600; line-height: 22px; min-width: 0;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .host-meta { font-size: 11px; line-height: 16px; color: var(--rp-muted); min-width: 0;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .host-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  /* 纯图标按钮原本是个 22x22 的正方形;现在齿轮旁边要带一句"Settings"文字,改成自适应宽度、
+     图标和文字之间留个 gap——光有一个小齿轮图标,不点点看根本猜不出这是设置入口。 */
+  .icon-btn { display: flex; align-items: center; justify-content: center; gap: 5px; height: 22px;
+              padding: 0 7px 0 5px; border: none; border-radius: 4px; background: transparent; color: var(--rp-muted);
+              font-family: inherit; font-size: 11px; line-height: 16px; white-space: nowrap; cursor: pointer; }
+  .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+                     color: var(--vscode-foreground); }
+  .icon-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  .icon-btn svg { flex-shrink: 0; }
+
+  .section { margin-top: 26px; }
+  .section-head { display: flex; align-items: center; gap: 8px; min-height: 20px;
+                  padding-bottom: 7px; border-bottom: 1px solid var(--rp-hairline); }
+  .section-title { font-size: 11px; font-weight: 700; line-height: 16px; letter-spacing: 0.09em;
+                   text-transform: uppercase; color: var(--vscode-foreground); }
+  .badge { margin-left: auto; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 8px;
+           background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+  .rows { display: flex; flex-direction: column; margin-top: 7px; }
+
+  /* 一套栅格贯穿所有区块:标签 | 明细 | 进度条 | 数值。
+     标签列用 fr 而不是固定 88px:挂载点路径(/usr/lib/wsl/drivers)在固定列里必然被截断,
+     而富余宽度全被明细列白白吃掉。fr 在各行之间解析结果一致,所以列仍然对齐。
+     minmax 的下限保证窄栏不塌,上限让标签优先拿到多出来的空间。 */
+  .row { display: grid; grid-template-columns: minmax(84px, 1.5fr) minmax(0, 1fr) minmax(132px, 0.8fr) 46px;
+         align-items: center; gap: 12px; height: 22px; }
+  .row.sub { grid-template-columns: minmax(68px, 1.5fr) minmax(0, 1fr) minmax(132px, 0.8fr) 46px; padding-left: 16px; }
+  .row.wide { grid-template-columns: minmax(84px, 1.5fr) minmax(0, 1fr) auto; }
+  .row.sub.wide { grid-template-columns: minmax(68px, 1.5fr) minmax(0, 1fr) auto; }
+  .row-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.sub .row-label { font-size: 11px; color: var(--rp-muted); }
+  .row.strong .row-label { font-weight: 600; }
+  .row-detail { font-size: 11px; color: var(--rp-muted); min-width: 0; text-align: right;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .track { display: block; height: 4px; border-radius: 2px; background: var(--rp-track); overflow: hidden; }
+  .fill { display: block; height: 100%; border-radius: 2px; background: var(--vscode-foreground); opacity: 0.5; }
+  .warning .fill { background: var(--rp-warning); opacity: 1; }
+  .critical .fill { background: var(--rp-critical); opacity: 1; }
+  .warning .row-value { color: var(--rp-warning); }
+  .critical .row-value { color: var(--rp-critical); }
+
+  .trow { display: grid; grid-template-columns: minmax(0, 1fr) 96px 96px; align-items: center; gap: 12px; height: 22px; }
+  .trow.head { font-size: 11px; line-height: 16px; letter-spacing: 0.04em; text-transform: uppercase;
+               color: var(--rp-muted); height: 20px; }
+  .trow span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .trow span:first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .legend { display: flex; align-items: center; gap: 14px; margin-left: auto;
+            font-size: 11px; line-height: 16px; color: var(--rp-muted); }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-value { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; }
+  .swatch { width: 8px; height: 2px; border-radius: 1px; flex-shrink: 0; }
+  /* 悬浮提示是绝对定位在图表上的浮层,包裹容器要立坐标系。 */
+  .chart-wrap { position: relative; margin-top: 4px; }
+  .chart { display: block; width: 100%; cursor: crosshair; }
+  .chart .grid { stroke: var(--rp-hairline); stroke-width: 1; }
+  .chart .axis { fill: var(--rp-muted); font-size: 11px; }
+  .chart .cpu { fill: none; stroke: var(--rp-cpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .mem { fill: none; stroke: var(--rp-mem); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .gpu { fill: none; stroke: var(--rp-gpu); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .net-rx { fill: none; stroke: var(--rp-net-rx); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .net-tx { fill: none; stroke: var(--rp-net-tx); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 3 2; }
+  .chart .guide { stroke: var(--rp-muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; pointer-events: none; }
+  .chart .hover-dot { opacity: 0; pointer-events: none; }
+  .hint { font-size: 11px; line-height: 16px; color: var(--rp-muted); margin: 6px 0 0; }
+
+  /* VS Code 的 hover widget token——用同一套语义色,浮层才像"原生弹出",不是自造的卡片。 */
+  .chart-tooltip {
+    position: absolute; z-index: 1; top: 0; left: 0;
+    display: none; flex-direction: column; gap: 2px;
+    padding: 6px 8px; border-radius: 3px; white-space: nowrap; pointer-events: none;
+    font-size: 11px; line-height: 16px;
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--rp-hairline));
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  }
+  .chart-tooltip .time { color: var(--rp-muted); }
+  .chart-tooltip .metric { display: flex; align-items: center; gap: 6px; }
+  .chart-tooltip .metric .swatch { width: 6px; height: 6px; border-radius: 50%; }
+  .chart-tooltip .metric .value { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  /* 面板常以 ViewColumn.Beside 打开,窄栏是常态:进度条改占整行,信息一条不丢。 */
+  @media (max-width: 520px) {
+    .panel { padding: 14px 12px 24px; }
+    .row, .row.sub, .row.wide, .row.sub.wide {
+      display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) 46px;
+      grid-template-areas: "label detail value" "bar bar bar";
+      height: auto; padding: 1px 0 5px; gap: 2px 8px; align-items: baseline;
+    }
+    /* 无进度条的行(网络速率、运行时长、温度)数值本身就长,不能挤进 44px 的数值列。 */
+    .row.wide, .row.sub.wide { grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; }
+    .row.sub { padding-left: 12px; }
+    .row-label { grid-area: label; }
+    .row-detail { grid-area: detail; text-align: right; }
+    .row-value { grid-area: value; }
+    .track { grid-area: bar; margin-top: 2px; }
+    .trow { grid-template-columns: minmax(0, 1fr) 60px 72px; gap: 8px; }
+    /* 图例现在带着"CPU 61%"这样的数值,窄栏里和标题挤不下,允许换到第二行。 */
+    .section-head { flex-wrap: wrap; row-gap: 4px; }
+    .legend { margin-left: 0; }
+  }

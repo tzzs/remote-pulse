@@ -11,6 +11,11 @@ export class StatsStore {
     this.history = new RingBuffer<Snapshot>(capacity);
   }
 
+  /** 趋势窗口或采集间隔变了,能覆盖该窗口所需的采样点数也跟着变。 */
+  setCapacity(capacity: number): void {
+    this.history.setCapacity(Math.max(2, Math.ceil(capacity)));
+  }
+
   push(snapshot: Snapshot): void {
     this.history.push(snapshot);
   }

@@ -1,0 +1,5 @@
+{
+  "//": "Marks media/*.js as ES modules for both Node (unit tests import chart.js directly) and the webview's <script type=\"module\">. This file ships in the .vsix and is inert at runtime.",
+  "type": "module",
+  "private": true
+}

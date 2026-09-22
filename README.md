@@ -36,15 +36,19 @@ Three settings share the same four candidate metrics (`cpu`/`memory`/`gpu`/`netw
 
 ## Features
 
-- **CPU**: overall usage and core count (delta-based `/proc/stat` calculation, not loadavg)
-- **Memory**: usage percentage and used/total (uses `MemAvailable` rather than `MemFree`, which better reflects what's actually available)
-- **Disk**: per-mount-point usage (virtual filesystems are filtered out automatically, and mount points that report byte-identical total/used space — the same underlying disk bind-mounted at more than one path, e.g. WSL2's `/mnt/wslg/distro` mirroring `/` — are collapsed to whichever path is shallower; shows every remaining real mount point by default, sorted by usage so the fullest one leads, or specify mount points manually to show only those)
-- **Network**: download/upload rate, always shown as two separate numbers (status bar icons, chart lines, or arrows) rather than a combined figure — merging them hides which direction is actually busy; optionally plotted as two lines in the 30-minute chart sharing their own right-hand axis, scaled to the window's own peak since throughput has no natural 0-100% scale like CPU/memory (off by default via `trendChartMetrics`, independent of whether the rate is shown as a detail row)
-- **GPU**: VRAM usage, utilization, temperature (requires `nvidia-smi`; the module simply stays inactive if it's unavailable)
-- **Docker**: running container count plus per-container CPU/memory usage (requires access to `/var/run/docker.sock`; degrades silently without permission)
-- **Threshold alerts**: CPU and memory each turn green/yellow/red independently as they cross the warning/critical thresholds, with an optional system notification (fires once per crossing into the critical state, so it won't spam you)
-- **History trend**: a Webview line chart of the last 30 minutes
-- **Adaptive polling**: automatically throttles once the window loses focus, reducing load on the remote machine
+- **CPU**: overall usage and core count (delta-based `/proc/stat` calculation, not loadavg), plus 1/5/15-minute load average scaled by core count
+- **Memory**: usage percentage and used/total (uses `MemAvailable` rather than `MemFree`, which better reflects what's actually available); swap usage appears automatically when the host has swap configured
+- **Container-aware**: inside a Dev Container / Codespace, CPU and memory are measured against the cgroup quota (v1 and v2) instead of the host's `/proc` values, and labeled `cgroup limit` so you know which denominator you're looking at (`remotePulse.cgroupAware`)
+- **Disk**: per-mount-point usage computed exactly like `df` (root-reserved blocks are not counted as used; virtual filesystems are filtered out; bind mounts of the same disk are collapsed to the shallower path; sorted by usage). Optional read/write throughput from `/proc/diskstats`, counting whole devices only so partitions aren't double-counted
+- **Network**: download/upload rate, always shown as two separate numbers. Virtual interfaces (`docker0`, `veth*`, `br-*`, `tun*`, …) are excluded by default because their traffic is container-internal or double-counted; pin specific interfaces with `remotePulse.networkInterfaces`
+- **GPU**: VRAM usage, utilization, temperature (requires `nvidia-smi`). On multi-GPU hosts, choose whether the status bar and chart follow GPU 0 or the busiest GPU (`remotePulse.gpuSelection`). Temperature has its own °C thresholds
+- **Top processes**: optional table of the busiest processes by CPU, with CPU% on the same scale as the overall CPU row
+- **Docker**: running container count plus per-container CPU/memory, with bounded concurrency and a container cap so large hosts don't hammer the daemon
+- **Hover details**: every status bar item shows a tooltip with the host, sparklines for the last 5 minutes, and every collected metric
+- **Threshold alerts**: CPU and memory each turn yellow/red independently; optional notifications for CPU/memory/disk/GPU (`remotePulse.notificationMetrics`) that fire once per crossing and offer *View trend chart* / *Mute for 1 hour*
+- **History trend**: a Webview line chart with a configurable window (`remotePulse.trendWindowMinutes`); screen readers get region landmarks, progress-bar semantics and a text description of the chart
+- **Adaptive polling**: throttles once the window loses focus; slow-changing metrics (disk, GPU, Docker, processes) live on their own slower loop
+- **Diagnosable**: collection failures stay silent in the UI but are recorded in the `Remote Pulse` output channel (`Remote Pulse: Show Logs`)
 - **Localized UI**: commands, settings, and the status bar/webview text follow VS Code's display language (English by default, with a 简体中文 translation)
 
 ## Installation
@@ -69,31 +73,47 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 
 | Setting | Default | Description |
 |---|---|---|
-| `remotePulse.refreshInterval` | `2000` | Refresh interval for high-frequency foreground metrics (CPU/memory), in ms |
+| `remotePulse.refreshInterval` | `2000` | Refresh interval for high-frequency foreground metrics (CPU/memory/network), in ms |
 | `remotePulse.backgroundInterval` | `15000` | Throttled refresh interval once the window loses focus, in ms |
-| `remotePulse.heavyMetricInterval` | `10000` | Independent polling interval for low-frequency metrics like GPU/Docker, in ms |
-| `remotePulse.warningThreshold` | `80` | Warning threshold (%) |
+| `remotePulse.heavyMetricInterval` | `10000` | Polling interval for low-frequency metrics (disk, GPU, Docker, processes), in ms |
+| `remotePulse.warningThreshold` | `80` | Warning threshold (%). Swapped with the critical threshold if set higher than it |
 | `remotePulse.criticalThreshold` | `95` | Critical threshold (%) |
-| `remotePulse.statusBarMetrics` | `["cpu", "memory"]` | Which metrics to show as status bar items — `cpu`, `memory`, `gpu` (primary GPU only), `network` (download/upload shown separately with arrow icons); unselected metrics still appear in the trend panel. Run `Remote Pulse: Configure Status Bar Metrics` for a real multi-select picker |
-| `remotePulse.trendPanelSections` | `["gpu", "docker"]` | Which optional sections/rows to show in the trend panel body (GPU cards, Docker table, the network row in "System"); System and Storage are always shown. Independent of `trendChartMetrics` — this doesn't affect the chart. Run `Remote Pulse: Configure Trend Panel Sections` for a real multi-select picker |
-| `remotePulse.trendChartMetrics` | `["cpu", "memory"]` | Which metrics to plot as lines in the trend panel's 30-minute chart — `cpu`, `memory`, `gpu` (primary GPU only), `network` (download and upload as two separate lines sharing their own right-hand axis). Independent of `trendPanelSections` and `statusBarMetrics`. Run `Remote Pulse: Configure Trend Chart Metrics` for a real multi-select picker |
-| `remotePulse.enableNotifications` | `false` | Whether to show a system notification when the critical threshold is crossed |
-| `remotePulse.diskMountPoints` | `[]` | Mount points to monitor; leave empty to show every real mount point, sorted by usage |
+| `remotePulse.gpuTempWarningThreshold` | `80` | GPU temperature warning threshold (°C) |
+| `remotePulse.gpuTempCriticalThreshold` | `90` | GPU temperature critical threshold (°C) |
+| `remotePulse.statusBarMetrics` | `["cpu", "memory"]` | Status bar items — `cpu`, `memory`, `gpu`, `network`. Run `Remote Pulse: Configure Status Bar Metrics` for a multi-select picker |
+| `remotePulse.statusBarAlignment` | `"left"` | `left` (next to the remote indicator) or `right` |
+| `remotePulse.trendPanelSections` | `["gpu", "docker"]` | Optional panel sections — `network`, `diskIo`, `gpu`, `processes`, `docker`. System and Storage are always shown. Independent of the chart |
+| `remotePulse.trendChartMetrics` | `["cpu", "memory"]` | Lines in the trend chart — `cpu`, `memory`, `gpu`, `network` (download/upload on their own right-hand axis) |
+| `remotePulse.trendWindowMinutes` | `30` | How much history the chart covers (1–240). History memory scales with this and the refresh interval |
+| `remotePulse.enableNotifications` | `false` | Show a notification when a critical threshold is crossed |
+| `remotePulse.notificationMetrics` | `["cpu", "memory", "disk"]` | Which metrics may raise that notification — `cpu`, `memory`, `disk`, `gpu` |
+| `remotePulse.diskMountPoints` | `[]` | Mount points to monitor; empty = every real mount point, sorted by usage |
+| `remotePulse.networkInterfaces` | `[]` | Interfaces to measure; empty = every physical interface (virtual ones excluded) |
+| `remotePulse.gpuSelection` | `"primary"` | Which GPU the status bar and chart follow on multi-GPU hosts — `primary` or `busiest` |
+| `remotePulse.topProcessCount` | `5` | Rows in the Top Processes section |
+| `remotePulse.dockerMaxContainers` | `20` | Containers to fetch per-container stats for; the rest only count toward the total |
+| `remotePulse.cgroupAware` | `true` | Measure CPU/memory against the container's cgroup quota when one exists |
 
 ## Commands
 
+Commands only appear in the Command Palette inside a remote window, where the extension is actually monitoring.
+
 - `Remote Pulse: Show Trend Chart` (`remotePulse.showTrend`, also bound to clicking the CPU/memory/GPU/network status bar items)
 - `Remote Pulse: Refresh Now` (`remotePulse.refresh`)
+- `Remote Pulse: Show Logs` (`remotePulse.showLogs`)
 - `Remote Pulse: Configure Status Bar Metrics` (`remotePulse.configureStatusBarMetrics`, also bound to clicking the alert icon)
 - `Remote Pulse: Configure Trend Panel Sections` (`remotePulse.configureTrendPanelSections`)
 - `Remote Pulse: Configure Trend Chart Metrics` (`remotePulse.configureTrendChartMetrics`)
+- `Remote Pulse: Configure Notification Metrics` (`remotePulse.configureNotificationMetrics`)
 
 ## Edge Cases
 
-- **Non-Linux remote hosts**: CPU/memory automatically fall back to Node.js's `os` module (slightly less precise); the network module is hidden entirely since there's no cross-platform equivalent
-- **First connection**: the status bar initially shows a `$(sync~spin)` loading state
-- **Collection failure** (permissions / network flakiness): shows `$(circle-slash)` — no intrusive error notifications
-- **GPU/Docker unavailable**: probed once at startup; if missing or unauthorized, the module simply stays inactive rather than retrying repeatedly
+- **Non-Linux remote hosts**: CPU/memory automatically fall back to Node.js's `os` module (slightly less precise); network, disk I/O and process modules are hidden since there's no cross-platform equivalent
+- **First connection**: the status bar initially shows a `$(sync~spin)` loading state, with a tooltip explaining it
+- **Partial failure**: each collector is settled independently — one failing metric keeps its last value for a few rounds and is then cleared, without taking the others down
+- **Total failure**: shows `$(circle-slash)`; the reason is in its tooltip and in the output channel, with no intrusive notification
+- **Hung network mounts**: each `statfs` call times out after 2 s, so a dead NFS/CIFS mount can't stall the extension host
+- **GPU/Docker unavailable**: re-probed every 5 minutes, so starting the Docker daemon or installing the driver is picked up without reloading the window
 
 ## Development
 
@@ -101,9 +121,18 @@ Once installed, connect to a Linux remote host over Remote-SSH and the metrics w
 npm install
 npm run build     # compile with tsc into out/
 npm test          # build, then run the unit tests under test/ (node:test)
+npm run lint      # ESLint over src/, test/ and the webview scripts in media/
 npm run test:integration  # runs test/integration/ in a real VS Code extension host (@vscode/test-cli)
 npm run package   # vsce package to produce a .vsix
 ```
+
+If the integration host fails to start with `listen EINVAL … .sock` (common inside git worktrees or deeply nested checkouts — Unix socket paths are capped at 103 characters), point it at a short user-data directory:
+
+```bash
+VSCODE_TEST_USER_DATA_DIR=/tmp/rp-ud npm run test:integration
+```
+
+The trend panel's stylesheet and scripts live in `media/` as real files; `media/chart.js` holds the chart math and is unit-tested directly from `test/chart.test.mjs`.
 
 Open this project in VS Code and press `F5` to launch an Extension Development Host for live debugging (locally on macOS/Windows, CPU/memory fall back to the `os` module path, so you can verify the core interactions even without a remote Linux host).
 
